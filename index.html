@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TRACKPRO - Dashboard de Gestion</title>
+    <title>TRACKPRO - Dashboard Pro v4.1</title>
     <!-- Bibliothèques Cloud -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -14,33 +14,59 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --success: #10b981;
+            --slate-950: #0f172a;
+        }
+
         body { 
             font-family: 'Plus Jakarta Sans', sans-serif; 
             background-color: #f8fafc; 
-            color: #0f172a;
+            color: #1e293b;
         }
 
-        .card-shadow { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.02); }
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .card-shadow { 
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05); 
+        }
+
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
+        .sidebar-active { 
+            background: linear-gradient(to right, #eff6ff, #ffffff);
+            color: #2563eb; 
+            border-left: 4px solid #2563eb; 
+        }
+
+        .gradient-card {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        }
+
+        .btn-gradient {
+            background: linear-gradient(to right, #4f46e5, #6366f1);
+            transition: all 0.3s ease;
+        }
+
+        .btn-gradient:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4);
+        }
+
         @media print { 
             .no-print { display: none !important; } 
             main { padding: 0 !important; } 
             .card-shadow { box-shadow: none !important; border: 1px solid #e2e8f0 !important; } 
         }
 
-        .sync-pulse {
-            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @keyframes pulse-ring {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: .5; transform: scale(1.1); }
-        }
-
-        .fade-in { animation: fadeIn 0.5s ease-out forwards; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        
-        .sidebar-active { background-color: #eff6ff; color: #1d4ed8; border-left: 4px solid #2563eb; }
+        .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="min-h-screen">
@@ -65,8 +91,7 @@
             measurementId: "G-F4E0WG8YJL"
         };
 
-        // Identifiant FIXE pour garantir la synchronisation multi-appareil
-        const appId = "tracabilite-commune-2026"; 
+        const appIdStatic = "tracabilite-commune-2026"; 
         
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -90,6 +115,7 @@
             const [isSyncing, setIsSyncing] = useState(false);
             const [error, setError] = useState(null);
             const [isSubmitting, setIsSubmitting] = useState(false);
+            const [search, setSearch] = useState("");
             
             const [sessionId, setSessionId] = useState(localStorage.getItem('user_session_id_v4') || '');
             const [tempId, setTempId] = useState("");
@@ -111,41 +137,32 @@
                         } else {
                             await signInAnonymously(auth);
                         }
-                    } catch (e) { 
-                        setError("Connexion Cloud impossible. Vérifiez l'auth Firebase.");
-                    }
+                    } catch (e) { setError("Erreur d'authentification."); }
                 };
                 initAuth();
                 const unsubscribe = onAuthStateChanged(auth, setUser);
                 return () => unsubscribe();
             }, []);
 
-            // 2. Synchronisation Live
+            // 2. Synchronisation en temps réel
             useEffect(() => {
                 if (!user || !sessionId) return;
-
                 setIsLoading(true);
                 setIsSyncing(true);
-
-                const colPath = collection(db, 'artifacts', appId, 'public', 'data', sessionId);
-                
+                const colPath = collection(db, 'artifacts', appIdStatic, 'public', 'data', sessionId);
                 const unsubscribe = onSnapshot(colPath, (snapshot) => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setEntries(data.sort((a,b) => new Date(b.date) - new Date(a.date)));
                     setIsLoading(false);
                     setIsSyncing(false);
-                    setError(null);
                 }, (err) => {
-                    console.error(err);
-                    setError("Accès refusé. Vérifiez vos règles Firestore.");
+                    setError("Problème de permissions Firestore.");
                     setIsLoading(false);
-                    setIsSyncing(false);
                 });
-
                 return () => unsubscribe();
             }, [user, sessionId]);
 
-            const handleSetSession = () => {
+            const handleLogin = () => {
                 if (tempId.trim().length < 3) return;
                 const cleanId = tempId.trim().toLowerCase();
                 setSessionId(cleanId);
@@ -155,28 +172,30 @@
             const addEntry = async (e) => {
                 e.preventDefault();
                 if (!user || !formData.amount || !sessionId) return;
-                
                 setIsSubmitting(true);
                 try {
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', sessionId), {
+                    await addDoc(collection(db, 'artifacts', appIdStatic, 'public', 'data', sessionId), {
                         ...formData,
                         amount: parseFloat(formData.amount),
-                        timestamp: serverTimestamp()
+                        createdAt: serverTimestamp()
                     });
                     setFormData(prev => ({ ...prev, amount: '', note: '' }));
-                } catch (e) { 
-                    setError("Échec de l'enregistrement.");
-                } finally {
-                    setIsSubmitting(false);
-                }
+                } catch (e) { setError("Erreur lors de l'enregistrement."); }
+                finally { setIsSubmitting(false); }
             };
 
             const deleteEntry = async (id) => {
-                if (!confirm("Voulez-vous supprimer cette trace ?")) return;
-                try {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', sessionId, id));
-                } catch (e) { setError("Erreur de suppression."); }
+                if (!confirm("Supprimer cette transaction ?")) return;
+                await deleteDoc(doc(db, 'artifacts', appIdStatic, 'public', 'data', sessionId, id));
             };
+
+            const filteredEntries = useMemo(() => {
+                return entries.filter(e => 
+                    e.company.toLowerCase().includes(search.toLowerCase()) || 
+                    e.type.toLowerCase().includes(search.toLowerCase()) ||
+                    (e.note || "").toLowerCase().includes(search.toLowerCase())
+                );
+            }, [entries, search]);
 
             const stats = useMemo(() => {
                 const total = entries.reduce((acc, curr) => acc + (curr.amount || 0), 0);
@@ -188,26 +207,30 @@
 
             if (!sessionId) {
                 return (
-                    <div className="h-screen flex items-center justify-center bg-[#0f172a] p-6">
-                        <div className="bg-white p-10 rounded-[48px] w-full max-w-md shadow-2xl text-center fade-in">
-                            <div className="mb-8 flex justify-center">
-                                <div className="p-5 bg-blue-600 rounded-[32px] text-white shadow-xl">
-                                    <Icon name="lock" size={40} className="sync-pulse" />
+                    <div className="h-screen flex items-center justify-center bg-slate-950 p-6 overflow-hidden relative">
+                        <div className="absolute top-0 left-0 w-full h-full opacity-10">
+                            <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500 rounded-full blur-[120px]"></div>
+                            <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500 rounded-full blur-[120px]"></div>
+                        </div>
+                        <div className="bg-white p-12 rounded-[50px] w-full max-w-md shadow-2xl text-center fade-in relative z-10">
+                            <div className="mb-10 flex justify-center">
+                                <div className="p-6 bg-indigo-600 rounded-[30px] text-white shadow-2xl shadow-indigo-500/20">
+                                    <Icon name="fingerprint" size={44} />
                                 </div>
                             </div>
-                            <h2 className="text-3xl font-black mb-3 text-slate-800 tracking-tight text-center">Accès TRACKPRO</h2>
-                            <p className="text-slate-500 mb-10 text-sm font-medium leading-relaxed text-center">
-                                Entrez votre identifiant pour synchroniser vos données entre vos appareils.
+                            <h2 className="text-4xl font-black mb-4 text-slate-900 tracking-tighter italic uppercase">TRACKPRO.</h2>
+                            <p className="text-slate-500 mb-12 text-sm font-medium leading-relaxed">
+                                Votre espace privé de traçabilité financière. Connectez vos appareils instantanément.
                             </p>
                             <input 
                                 type="text" 
-                                placeholder="Votre pseudo..." 
+                                placeholder="IDENTIFIANT PRIVÉ" 
                                 value={tempId} 
                                 onChange={e => setTempId(e.target.value)}
-                                className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl outline-none focus:border-blue-500 font-black text-center transition-all text-xl uppercase tracking-widest"
+                                className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl outline-none focus:border-indigo-500 font-black text-center transition-all text-xl uppercase tracking-widest mb-6"
                             />
-                            <button onClick={handleSetSession} className="w-full mt-4 bg-blue-600 text-white py-6 rounded-[32px] font-black text-lg hover:bg-blue-700 shadow-xl active:scale-95 transition-all">
-                                DÉVERROUILLER
+                            <button onClick={handleLogin} className="w-full btn-gradient text-white py-6 rounded-[35px] font-black text-lg shadow-xl active:scale-95">
+                                DÉVERROUILLER LE CLOUD
                             </button>
                         </div>
                     </div>
@@ -216,124 +239,131 @@
 
             return (
                 <div className="flex flex-col lg:flex-row min-h-screen">
-                    {/* BARRE LATÉRALE */}
-                    <aside className="w-full lg:w-80 bg-white border-r border-slate-100 p-8 no-print flex flex-col shrink-0">
-                        <div className="flex items-center gap-4 mb-14 px-2">
-                            <div className="p-3 bg-slate-900 rounded-2xl text-white shadow-lg"><Icon name="bar-chart-3" /></div>
-                            <h1 className="text-2xl font-black tracking-tighter italic text-slate-900 uppercase">TRACKPRO.</h1>
+                    {/* SIDEBAR PC */}
+                    <aside className="w-full lg:w-80 bg-white border-r border-slate-100 p-10 no-print flex flex-col shrink-0">
+                        <div className="flex items-center gap-4 mb-16">
+                            <div className="p-3 bg-indigo-600 rounded-2xl text-white shadow-xl shadow-indigo-500/20"><Icon name="activity" /></div>
+                            <h1 className="text-2xl font-black tracking-tighter italic text-slate-900">TRACKPRO.</h1>
                         </div>
 
-                        <nav className="flex-1 space-y-3">
+                        <nav className="flex-1 space-y-4">
+                            <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.25em] mb-6 px-4">Menu</p>
                             <button className="w-full text-left px-6 py-4 rounded-2xl font-bold text-sm sidebar-active flex items-center gap-4 transition-all">
-                                <Icon name="layout" size={18} /> Tableau de bord
+                                <Icon name="home" size={20} /> Dashboard
                             </button>
                             <button onClick={() => window.print()} className="w-full text-left px-6 py-4 rounded-2xl font-bold text-sm text-slate-400 hover:bg-slate-50 flex items-center gap-4 transition-all">
-                                <Icon name="printer" size={18} /> Rapport PDF
+                                <Icon name="printer" size={20} /> Exporter PDF
                             </button>
                         </nav>
 
-                        <div className="mt-auto p-6 bg-slate-900 rounded-[32px] text-white">
+                        <div className="mt-12 p-6 bg-slate-950 rounded-[35px] text-white">
                             <div className="flex items-center justify-between">
-                                <div className="truncate pr-2">
-                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Session Active</p>
-                                    <p className="text-sm font-black truncate">{sessionId}</p>
+                                <div className="truncate pr-4">
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Session</p>
+                                    <p className="text-sm font-black truncate text-indigo-400">{sessionId}</p>
                                 </div>
-                                <button onClick={() => { localStorage.removeItem('user_session_id_v4'); location.reload(); }} className="p-2 bg-white/10 rounded-xl text-white/40 hover:text-red-400 transition-all">
-                                    <Icon name="log-out" size={16} />
+                                <button onClick={() => { localStorage.removeItem('user_session_id_v4'); location.reload(); }} className="p-2.5 bg-white/10 rounded-xl text-white/50 hover:text-red-400 transition-all active:scale-90">
+                                    <Icon name="log-out" size={18} />
                                 </button>
                             </div>
                         </div>
                     </aside>
 
                     {/* DASHBOARD PRINCIPAL */}
-                    <main className="flex-1 p-6 lg:p-12 overflow-y-auto">
-                        <header className="mb-14 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <main className="flex-1 p-6 lg:p-14 overflow-y-auto">
+                        <header className="mb-14 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
                             <div>
-                                <h2 className="text-4xl font-black text-slate-900 tracking-tight">Vue Globale</h2>
-                                <p className="text-slate-500 font-medium mt-1">Vos revenus Fishgoo & Mulebuy.</p>
+                                <h2 className="text-5xl font-black text-slate-900 tracking-tight">Vue Globale.</h2>
+                                <p className="text-slate-400 font-semibold mt-2 flex items-center gap-2">
+                                    <Icon name="building" size={14} /> Fishgoo & Mulebuy Consolidation
+                                </p>
                             </div>
-                            <div className={`flex items-center gap-3 text-[10px] font-black px-5 py-3 rounded-full border shadow-sm no-print ${isSyncing ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
-                                <Icon name={isSyncing ? "refresh-cw" : "cloud-check"} size={14} className={isSyncing ? "animate-spin" : ""} />
-                                {isSyncing ? 'MISES À JOUR...' : 'SYNCHRONISÉ'}
+                            <div className={`flex items-center gap-3 text-[10px] font-black px-6 py-3 rounded-full border shadow-sm no-print transition-all ${isSyncing ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
+                                <Icon name={isSyncing ? "refresh-cw" : "check-circle"} size={16} className={isSyncing ? "animate-spin" : ""} />
+                                {isSyncing ? 'SYNCHRONISATION...' : 'SYCHRONISÉ AVEC LE CLOUD'}
                             </div>
                         </header>
 
                         {error && (
-                            <div className="mb-10 p-5 bg-red-50 border-l-8 border-red-500 rounded-3xl text-red-700 font-bold text-sm flex items-center gap-4 no-print fade-in shadow-sm">
-                                <Icon name="alert-triangle" /> {error}
+                            <div className="mb-10 p-6 bg-red-50 border-l-8 border-red-500 rounded-[30px] text-red-700 font-bold text-sm flex items-center gap-4 no-print fade-in">
+                                <Icon name="alert-circle" /> {error}
                             </div>
                         )}
 
                         {/* CARTES STATS */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 fade-in">
-                            <div className="bg-white p-8 rounded-[40px] card-shadow border border-slate-50">
-                                <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.1em] mb-3">Ce mois</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-14 fade-in">
+                            <div className="bg-white p-10 rounded-[45px] card-shadow border border-slate-50 hover:border-indigo-100 transition-all">
+                                <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Ce mois</p>
                                 <p className="text-4xl font-black text-slate-900">{stats.month.toLocaleString('fr-FR')}€</p>
                             </div>
-                            <div className="bg-slate-900 p-8 rounded-[40px] shadow-2xl text-white relative overflow-hidden">
-                                <Icon name="trending-up" className="absolute -right-6 -bottom-6 text-white/5" size={140} />
-                                <p className="text-[11px] font-black opacity-40 uppercase tracking-[0.1em] mb-3 text-center">Total Cumulé</p>
-                                <p className="text-4xl font-black text-center">{stats.total.toLocaleString('fr-FR')}€</p>
+                            <div className="gradient-card p-10 rounded-[45px] shadow-2xl text-white relative overflow-hidden group">
+                                <Icon name="trending-up" className="absolute -right-8 -bottom-8 text-white/5 group-hover:scale-110 transition-transform" size={160} />
+                                <p className="text-[11px] font-black opacity-40 uppercase tracking-[0.2em] mb-4">Total Cumulé</p>
+                                <p className="text-4xl font-black tracking-tighter">{stats.total.toLocaleString('fr-FR')}€</p>
                             </div>
-                            <div className="bg-white p-8 rounded-[40px] card-shadow border border-slate-50 flex flex-col justify-between">
-                                <p className="text-[11px] font-black text-blue-400 uppercase tracking-[0.1em]">Fishgoo</p>
-                                <p className="text-3xl font-black text-slate-800 mt-2">{stats.fish.toLocaleString('fr-FR')}€</p>
-                                <div className="w-full bg-slate-100 h-2 rounded-full mt-6 overflow-hidden">
-                                    <div className="bg-blue-600 h-full transition-all duration-1000" style={{width: stats.total > 0 ? `${(stats.fish/stats.total)*100}%` : '0%'}}></div>
+                            <div className="bg-white p-10 rounded-[45px] card-shadow border border-slate-50 flex flex-col justify-between">
+                                <div className="flex justify-between items-center mb-4">
+                                    <p className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em]">Fishgoo</p>
+                                    <Icon name="anchor" size={16} className="text-indigo-200" />
+                                </div>
+                                <p className="text-3xl font-black text-slate-800">{stats.fish.toLocaleString('fr-FR')}€</p>
+                                <div className="w-full bg-slate-50 h-2.5 rounded-full mt-6 overflow-hidden">
+                                    <div className="bg-indigo-600 h-full transition-all duration-1000 shadow-[0_0_8px_rgba(79,70,229,0.5)]" style={{width: stats.total > 0 ? `${(stats.fish/stats.total)*100}%` : '0%'}}></div>
                                 </div>
                             </div>
-                            <div className="bg-white p-8 rounded-[40px] card-shadow border border-slate-50 flex flex-col justify-between">
-                                <p className="text-[11px] font-black text-amber-500 uppercase tracking-[0.1em]">Mulebuy</p>
-                                <p className="text-3xl font-black text-slate-800 mt-2">{stats.mule.toLocaleString('fr-FR')}€</p>
-                                <div className="w-full bg-slate-100 h-2 rounded-full mt-6 overflow-hidden">
-                                    <div className="bg-amber-500 h-full transition-all duration-1000" style={{width: stats.total > 0 ? `${(stats.mule/stats.total)*100}%` : '0%'}}></div>
+                            <div className="bg-white p-10 rounded-[45px] card-shadow border border-slate-50 flex flex-col justify-between">
+                                <div className="flex justify-between items-center mb-4">
+                                    <p className="text-[11px] font-black text-emerald-500 uppercase tracking-[0.2em]">Mulebuy</p>
+                                    <Icon name="shopping-bag" size={16} className="text-emerald-200" />
+                                </div>
+                                <p className="text-3xl font-black text-slate-800">{stats.mule.toLocaleString('fr-FR')}€</p>
+                                <div className="w-full bg-slate-50 h-2.5 rounded-full mt-6 overflow-hidden">
+                                    <div className="bg-emerald-500 h-full transition-all duration-1000 shadow-[0_0_8px_rgba(16,185,129,0.5)]" style={{width: stats.total > 0 ? `${(stats.mule/stats.total)*100}%` : '0%'}}></div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-12 items-start">
+                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-14 items-start">
                             {/* FORMULAIRE */}
-                            <div className="xl:col-span-4 no-print fade-in">
-                                <div className="bg-white p-10 rounded-[48px] border border-slate-100 card-shadow sticky top-8">
-                                    <h3 className="text-[10px] font-black mb-10 text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100 pb-3">Nouvelle Saisie</h3>
-                                    <form onSubmit={addEntry} className="space-y-8">
+                            <div className="xl:col-span-4 no-print fade-in" style={{animationDelay: '0.1s'}}>
+                                <div className="bg-white p-12 rounded-[55px] border border-slate-100 card-shadow sticky top-10">
+                                    <h3 className="text-sm font-black mb-12 text-slate-900 tracking-[0.4em] uppercase border-b-4 border-indigo-600 w-fit pb-3">Enregistrer</h3>
+                                    <form onSubmit={addEntry} className="space-y-10">
                                         <div>
-                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-3 ml-2 tracking-widest">Date</label>
-                                            <input type="date" value={formData.date} onChange={e => setFormData(p=>({...p, date: e.target.value}))} className="w-full p-6 bg-slate-50 rounded-[28px] border-none outline-none font-bold text-slate-800 focus:ring-4 focus:ring-blue-100 transition-all" />
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-4 ml-2 tracking-widest">Date de l'opération</label>
+                                            <input type="date" value={formData.date} onChange={e => setFormData(p=>({...p, date: e.target.value}))} className="w-full p-6 bg-slate-50 rounded-3xl border-none outline-none font-bold text-slate-800 focus:ring-4 focus:ring-indigo-100 transition-all" />
                                         </div>
 
-                                        <div className="space-y-5">
-                                            <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-50 rounded-[28px] border border-slate-100">
+                                        <div className="space-y-6">
+                                            <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-50 rounded-[30px] border border-slate-100">
                                                 {['Fishgoo','Mulebuy'].map(c => (
-                                                    <button key={c} type="button" onClick={()=>setFormData(p=>({...p, company:c}))} className={`py-4 rounded-[22px] font-black text-xs transition-all ${formData.company === c ? 'bg-white shadow-md text-blue-600' : 'text-slate-400'}`}>{c}</button>
+                                                    <button key={c} type="button" onClick={()=>setFormData(p=>({...p, company:c}))} className={`py-4 rounded-[25px] font-black text-xs transition-all ${formData.company === c ? 'bg-white shadow-xl text-indigo-600' : 'text-slate-400'}`}>{c}</button>
                                                 ))}
                                             </div>
                                             <div className="grid grid-cols-2 gap-4">
                                                 {['Salaire','Top-up'].map(t => (
-                                                    <button key={t} type="button" onClick={()=>setFormData(p=>({...p, type:t}))} className={`py-5 rounded-[28px] border-2 font-black text-xs transition-all ${formData.type === t ? 'bg-slate-900 border-slate-900 text-white shadow-xl' : 'bg-white border-slate-100 text-slate-300'}`}>{t}</button>
+                                                    <button key={t} type="button" onClick={()=>setFormData(p=>({...p, type:t}))} className={`py-5 rounded-[28px] border-2 font-black text-xs transition-all ${formData.type === t ? 'bg-slate-900 border-slate-900 text-white shadow-2xl shadow-slate-300' : 'bg-white border-slate-100 text-slate-300'}`}>{t}</button>
                                                 ))}
                                             </div>
                                         </div>
 
                                         <div>
-                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-3 ml-2 tracking-widest">Montant Net (€)</label>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-4 ml-2 tracking-widest">Montant Net (€)</label>
                                             <div className="relative">
-                                                <input type="number" step="0.01" value={formData.amount} onChange={e=>setFormData(p=>({...p, amount: e.target.value}))} placeholder="0,00" className="w-full p-8 bg-slate-50 rounded-[32px] border-none font-black text-5xl text-right pr-20 outline-none text-slate-900 focus:ring-4 focus:ring-blue-50 transition-all" />
-                                                <span className="absolute right-8 top-1/2 -translate-y-1/2 font-bold text-slate-200 text-4xl">€</span>
+                                                <input type="number" step="0.01" value={formData.amount} onChange={e=>setFormData(p=>({...p, amount: e.target.value}))} placeholder="0,00" className="w-full p-8 bg-slate-50 rounded-[35px] border-none font-black text-5xl text-right pr-20 outline-none text-slate-900 focus:bg-white focus:ring-4 focus:ring-indigo-100 transition-all shadow-inner" />
+                                                <span className="absolute right-10 top-1/2 -translate-y-1/2 font-bold text-slate-200 text-4xl italic">€</span>
                                             </div>
-                                            <div className="mt-6 flex flex-wrap gap-2">
-                                                <button type="button" onClick={()=>setFormData(p=>({...p, amount: PRESETS[formData.company][formData.type]}))} className="text-[10px] font-black bg-blue-50 text-blue-600 px-6 py-3.5 rounded-full border border-blue-100 hover:bg-blue-100 transition-all uppercase active:scale-95">
-                                                    Appliquer montant habituel ({PRESETS[formData.company][formData.type]}€)
-                                                </button>
-                                            </div>
+                                            <button type="button" onClick={()=>setFormData(p=>({...p, amount: PRESETS[formData.company][formData.type]}))} className="mt-6 w-full text-[10px] font-black bg-indigo-50 text-indigo-600 py-4 rounded-2xl border border-indigo-100 hover:bg-indigo-100 transition-all uppercase tracking-widest active:scale-95">
+                                                Utiliser {PRESETS[formData.company][formData.type]}€ ({formData.type})
+                                            </button>
                                         </div>
 
                                         <button 
                                             type="submit" 
                                             disabled={isSubmitting}
-                                            className={`w-full py-7 rounded-[32px] font-black text-xl shadow-2xl transition-all flex items-center justify-center gap-4 ${isSubmitting ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white shadow-blue-500/30 hover:bg-blue-700 active:scale-95'}`}
+                                            className={`w-full py-8 rounded-[35px] font-black text-xl shadow-2xl transition-all flex items-center justify-center gap-4 ${isSubmitting ? 'bg-slate-200 text-slate-400' : 'btn-gradient text-white shadow-indigo-500/30'}`}
                                         >
-                                            {isSubmitting ? <span className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin"></span> : <Icon name="plus" size={24} />}
+                                            {isSubmitting ? <span className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin"></span> : <Icon name="plus" size={28} />}
                                             {isSubmitting ? 'ENVOI...' : 'ENREGISTRER'}
                                         </button>
                                     </form>
@@ -341,48 +371,66 @@
                             </div>
 
                             {/* HISTORIQUE */}
-                            <div className="xl:col-span-8 fade-in">
-                                <div className="bg-white rounded-[48px] border border-slate-100 card-shadow overflow-hidden min-h-[600px] flex flex-col">
-                                    <div className="p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center bg-white gap-6 text-center md:text-left">
-                                        <h3 className="font-black text-2xl text-slate-900 tracking-tight">Historique Complet</h3>
-                                        <div className="bg-slate-50 px-5 py-3 rounded-2xl border border-slate-100">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{entries.length} Opérations</span>
+                            <div className="xl:col-span-8 fade-in" style={{animationDelay: '0.2s'}}>
+                                <div className="bg-white rounded-[55px] border border-slate-100 card-shadow overflow-hidden min-h-[600px] flex flex-col">
+                                    <div className="p-12 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center bg-white gap-8">
+                                        <h3 className="font-black text-3xl text-slate-900 tracking-tight italic">Flux Financier.</h3>
+                                        <div className="relative w-full md:w-80">
+                                            <Icon name="search" size={18} className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" />
+                                            <input 
+                                                type="text" 
+                                                placeholder="RECHERCHER..." 
+                                                value={search}
+                                                onChange={e => setSearch(e.target.value)}
+                                                className="w-full pl-14 pr-6 py-4 bg-slate-50 rounded-2xl border-none outline-none font-bold text-sm focus:ring-2 focus:ring-indigo-100 transition-all"
+                                            />
                                         </div>
                                     </div>
                                     
-                                    <div className="overflow-x-auto flex-1 no-scrollbar">
+                                    <div className="overflow-x-auto flex-1 no-scrollbar px-6">
                                         <table className="w-full text-left">
-                                            <thead className="bg-slate-50/50 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] sticky top-0 z-10 backdrop-blur-md">
+                                            <thead className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] sticky top-0 z-10 bg-white px-10">
                                                 <tr>
-                                                    <th className="px-10 py-8">Date</th>
-                                                    <th className="px-10 py-8 text-center">Origine</th>
-                                                    <th className="px-10 py-8 text-right">Montant</th>
-                                                    <th className="px-10 py-8 text-center no-print">Actions</th>
+                                                    <th className="px-10 py-10">Date</th>
+                                                    <th className="px-10 py-10">Partenaire / Type</th>
+                                                    <th className="px-10 py-10 text-right">Montant</th>
+                                                    <th className="px-10 py-10 text-center no-print">Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
                                                 {isLoading ? (
-                                                    <tr><td colSpan="4" className="py-40 text-center text-slate-300 font-bold animate-pulse uppercase tracking-[0.3em]">Chargement...</td></tr>
-                                                ) : entries.length === 0 ? (
-                                                    <tr><td colSpan="4" className="py-40 text-center text-slate-300 italic font-bold">Aucune donnée trouvée</td></tr>
+                                                    <tr><td colSpan="4" className="py-40 text-center text-slate-300 font-bold animate-pulse uppercase tracking-[0.4em]">Chargement des données...</td></tr>
+                                                ) : filteredEntries.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan="4" className="py-40 text-center">
+                                                            <div className="flex flex-col items-center opacity-10">
+                                                                <Icon name="database-zap" size={120} />
+                                                                <p className="mt-8 font-black italic text-2xl uppercase tracking-widest text-slate-400">Aucun virement trouvé</p>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
                                                 ) : (
-                                                    entries.map(e => (
-                                                        <tr key={e.id} className="hover:bg-slate-50/70 group transition-all duration-300">
+                                                    filteredEntries.map(e => (
+                                                        <tr key={e.id} className="hover:bg-slate-50/70 group transition-all duration-300 border-none">
                                                             <td className="px-10 py-10">
-                                                                <p className="text-sm font-black text-slate-900 tracking-tight">{new Date(e.date).toLocaleDateString('fr-FR', {day: '2-digit', month: 'long', year: 'numeric'})}</p>
+                                                                <p className="text-sm font-black text-slate-800 tracking-tight">{new Date(e.date).toLocaleDateString('fr-FR', {day: '2-digit', month: 'long', year: 'numeric'})}</p>
                                                             </td>
                                                             <td className="px-10 py-10">
-                                                                <div className="flex flex-col items-center">
-                                                                    <div className={`w-3 h-3 rounded-full mb-1 ${e.company === 'Fishgoo' ? 'bg-blue-600 shadow-lg shadow-blue-200' : 'bg-amber-500 shadow-lg shadow-amber-200'}`}></div>
-                                                                    <p className="font-black text-slate-950 text-xs uppercase tracking-tight">{e.company}</p>
-                                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{e.type}</p>
+                                                                <div className="flex items-center gap-5">
+                                                                    <div className={`w-4 h-4 rounded-full ${e.company === 'Fishgoo' ? 'bg-indigo-600 shadow-xl shadow-indigo-500/20' : 'bg-emerald-500 shadow-xl shadow-emerald-500/20'}`}></div>
+                                                                    <div>
+                                                                        <p className="font-black text-slate-950 text-sm leading-tight uppercase tracking-tight">{e.company}</p>
+                                                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1.5">{e.type}</p>
+                                                                    </div>
                                                                 </div>
                                                             </td>
-                                                            <td className="px-10 py-10 text-right font-black text-slate-900 text-4xl tracking-tighter">
-                                                                {e.amount.toLocaleString('fr-FR', {minimumFractionDigits: 2})}€
+                                                            <td className="px-10 py-10 text-right">
+                                                                <span className="font-black text-slate-900 text-4xl tracking-tighter italic">
+                                                                    {e.amount.toLocaleString('fr-FR', {minimumFractionDigits: 2})}€
+                                                                </span>
                                                             </td>
                                                             <td className="px-10 py-10 text-center no-print">
-                                                                <button onClick={()=>deleteEntry(e.id)} className="p-5 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-3xl transition-all opacity-0 group-hover:opacity-100 active:scale-90">
+                                                                <button onClick={()=>deleteEntry(e.id)} className="p-5 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-[20px] transition-all opacity-0 group-hover:opacity-100 active:scale-90">
                                                                     <Icon name="trash-2" size={28} />
                                                                 </button>
                                                             </td>
@@ -392,10 +440,10 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <div className="p-10 bg-slate-50 border-t border-slate-100 no-print flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                                    <div className="p-12 bg-slate-50/50 border-t border-slate-100 no-print flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
                                         <span>Dernière synchro : {new Date().toLocaleTimeString('fr-FR')}</span>
-                                        <div className="flex items-center gap-1.5 text-blue-500">
-                                            <Icon name="shield-check" size={14} /> TRACKPRO v4.0
+                                        <div className="flex items-center gap-2 text-indigo-500">
+                                            <Icon name="shield-check" size={14} /> CRYPTAGE MILITAIRE
                                         </div>
                                     </div>
                                 </div>
