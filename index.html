@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TRACKPRO - Dashboard Pro v4.9</title>
+    <title>TRACKPRO - Dashboard Pro v5.0</title>
     <!-- Bibliothèques Cloud -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -42,6 +42,10 @@
             background-color: #f8fafc;
             color: #4f46e5; 
             border-right: 4px solid #4f46e5; 
+        }
+
+        .gradient-card {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
         }
 
         .btn-gradient {
@@ -163,7 +167,7 @@
                 note: ''
             });
 
-            // 1. Authentification (Règle 3)
+            // 1. Authentification
             useEffect(() => {
                 const initAuth = async () => {
                     try {
@@ -183,7 +187,7 @@
                 return () => unsubscribe();
             }, []);
 
-            // 2. Synchronisation Live (Règle 1)
+            // 2. Synchronisation Live
             useEffect(() => {
                 if (!user || !sessionId) return;
                 setIsLoading(true);
@@ -216,7 +220,6 @@
             const addEntry = async (e) => {
                 if (e) e.preventDefault();
                 
-                // Prévention de crash : On vérifie l'état AVANT de lancer l'appel Firebase
                 if (!user) {
                     setError("Impossible d'enregistrer : Connexion au Cloud non établie.");
                     return;
@@ -303,7 +306,7 @@
                             <h2 className="text-4xl font-black mb-4 text-slate-900 tracking-tighter uppercase italic">TRACKPRO.</h2>
                             <p className="text-slate-500 mb-12 text-sm font-medium leading-relaxed">Entrez votre pseudo pour synchroniser PC et Mobile.</p>
                             <input type="text" placeholder="PSEUDO" value={tempId} onChange={e => setTempId(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleLogin()} className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl outline-none focus:border-indigo-500 font-black text-center text-xl uppercase mb-6" />
-                            <button onClick={handleLogin} className="w-full btn-gradient text-white py-6 rounded-[35px] font-black text-lg active:scale-95 transition-all">DÉVERROUILLER</button>
+                            <button onClick={handleLogin} className="w-full btn-gradient text-white py-6 rounded-[35px] font-black text-lg active:scale-95 transition-all uppercase tracking-widest">DÉVERROUILLER</button>
                         </div>
                     </div>
                 );
@@ -335,7 +338,7 @@
                                     <button onClick={copyId} title="Copier l'ID" className={`p-2.5 rounded-xl transition-all ${copyStatus ? 'bg-emerald-500 text-white' : 'bg-white/10 text-white/50 hover:text-white'}`}>
                                         <Icon name={copyStatus ? "check" : "copy"} size={16} />
                                     </button>
-                                    <button onClick={() => { localStorage.removeItem('user_session_id_v4'); location.reload(); }} className="p-2.5 bg-white/10 rounded-xl text-white/50 hover:text-red-400">
+                                    <button onClick={() => { if(confirm('Déconnexion ?')) { localStorage.removeItem('user_session_id_v4'); location.reload(); } }} className="p-2.5 bg-white/10 rounded-xl text-white/50 hover:text-red-400">
                                         <Icon name="log-out" size={16} />
                                     </button>
                                 </div>
@@ -398,11 +401,11 @@
                         <div className="grid grid-cols-1 xl:grid-cols-12 gap-14 items-start">
                             <div className="xl:col-span-4 no-print">
                                 <div className="bg-white p-12 rounded-[55px] premium-shadow sticky top-10 border border-slate-100 transition-all">
-                                    <h3 className="text-xs font-black mb-12 text-slate-900 tracking-widest uppercase border-b-4 border-indigo-600 w-fit pb-3">Nouvelle Saisie</h3>
+                                    <h3 className="text-xs font-black mb-12 text-slate-900 tracking-widest uppercase border-b-4 border-indigo-600 w-fit pb-3 italic">Nouvelle Saisie</h3>
                                     <form onSubmit={addEntry} className="space-y-10">
                                         <div>
                                             <label className="text-[10px] font-black text-slate-400 block mb-4 ml-2 uppercase">DATE</label>
-                                            <input type="date" value={formData.date} onChange={e => setFormData(p=>({...p, date: e.target.value}))} className="w-full p-6 bg-slate-50 rounded-3xl outline-none font-bold text-slate-800 focus:ring-4 focus:ring-indigo-100" />
+                                            <input type="date" value={formData.date} onChange={e => setFormData(p=>({...p, date: e.target.value}))} className="w-full p-6 bg-slate-50 rounded-3xl outline-none font-bold text-slate-800 focus:ring-4 focus:ring-indigo-100 transition-all border-none shadow-sm" />
                                         </div>
                                         <div className="space-y-6">
                                             <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-50 rounded-[30px] border border-slate-100">
@@ -412,16 +415,16 @@
                                             </div>
                                             <div className="grid grid-cols-2 gap-4">
                                                 {['Salaire','Top-up'].map(t => (
-                                                    <button key={t} type="button" onClick={()=>setFormData(p=>({...p, type:t}))} className={`py-5 rounded-[28px] border-2 font-black text-xs transition-all ${formData.type === t ? 'bg-slate-900 border-slate-900 text-white shadow-2xl' : 'bg-white text-slate-300'}`}>{t}</button>
+                                                    <button key={t} type="button" onClick={()=>setFormData(p=>({...p, type:t}))} className={`py-5 rounded-[28px] border-2 font-black text-xs transition-all ${formData.type === t ? 'bg-slate-900 border-slate-900 text-white shadow-2xl' : 'bg-white border-slate-100 text-slate-300'}`}>{t}</button>
                                                 ))}
                                             </div>
                                         </div>
                                         <div>
-                                            <div className="relative">
-                                                <input type="number" step="0.01" value={formData.amount} onChange={e=>setFormData(p=>({...p, amount: e.target.value}))} placeholder="0,00" className="w-full p-8 bg-slate-50 rounded-[35px] font-black text-5xl text-right pr-20 outline-none text-slate-900 focus:ring-4 focus:ring-indigo-100" />
-                                                <span className="absolute right-10 top-1/2 -translate-y-1/2 font-bold text-slate-200 text-4xl italic">€</span>
+                                            <div className="relative group">
+                                                <input type="number" step="0.01" value={formData.amount} onChange={e=>setFormData(p=>({...p, amount: e.target.value}))} placeholder="0,00" className="w-full p-8 bg-slate-50 rounded-[35px] font-black text-5xl text-right pr-20 outline-none text-slate-900 focus:ring-4 focus:ring-indigo-100 focus:bg-white transition-all shadow-sm" />
+                                                <span className="absolute right-10 top-1/2 -translate-y-1/2 font-bold text-slate-200 text-4xl italic group-focus-within:text-indigo-100 transition-colors">€</span>
                                             </div>
-                                            <button type="button" onClick={()=>setFormData(p=>({...p, amount: PRESETS[formData.company][formData.type]}))} className="mt-6 w-full text-[10px] font-black bg-indigo-50 text-indigo-600 py-4 rounded-2xl active:scale-95 uppercase tracking-widest border border-indigo-100 transition-colors">Appliquer montant habituel ({PRESETS[formData.company][formData.type]}€)</button>
+                                            <button type="button" onClick={()=>setFormData(p=>({...p, amount: PRESETS[formData.company][formData.type]}))} className="mt-6 w-full text-[10px] font-black bg-indigo-50 text-indigo-600 py-4 rounded-2xl active:scale-95 uppercase tracking-widest border border-indigo-100 transition-colors">Habituel ({PRESETS[formData.company][formData.type]}€)</button>
                                         </div>
                                         <button type="submit" disabled={isSubmitting || !user} className={`w-full py-8 rounded-[40px] font-black text-2xl shadow-2xl flex items-center justify-center gap-4 transition-all ${justSaved ? 'btn-success text-white' : (isSubmitting || !user ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'btn-gradient text-white shadow-indigo-500/30 active:scale-95')}`}>
                                             {isSubmitting ? <Icon name="refresh-cw" className="animate-spin" /> : <Icon name={justSaved ? "check-circle" : "plus"} />}
@@ -433,17 +436,17 @@
 
                             <div className="xl:col-span-8">
                                 <div className="bg-white rounded-[55px] border border-slate-100 card-shadow min-h-[600px] flex flex-col overflow-hidden">
-                                    <div className="p-12 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center gap-8 bg-white/50 backdrop-blur-sm">
+                                    <div className="p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center gap-8 bg-white/50 backdrop-blur-sm">
                                         <h3 className="font-black text-3xl text-slate-900 italic tracking-tighter uppercase">Historique.</h3>
                                         <div className="relative w-full md:w-80">
                                             <Icon name="search" size={18} className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" />
-                                            <input type="text" placeholder="FILTRER..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-14 pr-6 py-4 bg-slate-50 rounded-2xl outline-none font-bold text-sm focus:ring-2 focus:ring-indigo-100 border-none" />
+                                            <input type="text" placeholder="FILTRER..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-14 pr-6 py-4 bg-slate-50 rounded-2xl outline-none font-bold text-sm focus:ring-2 focus:ring-indigo-100 border-none shadow-sm" />
                                         </div>
                                     </div>
                                     <div className="overflow-x-auto flex-1 no-scrollbar px-6 text-center lg:text-left">
                                         <table className="w-full text-left">
-                                            <thead className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] sticky top-0 z-10 bg-white">
-                                                <tr><th className="px-10 py-10">Date</th><th className="px-10 py-10 text-center">Origine / Catégorie</th><th className="px-10 py-10 text-right">Montant Net</th><th className="px-10 py-10 text-center no-print">Actions</th></tr>
+                                            <thead className="text-[9px] font-black uppercase text-slate-400 tracking-[0.4em] sticky top-0 z-10 bg-white shadow-sm shadow-slate-50/50">
+                                                <tr><th className="px-10 py-6">Date</th><th className="px-10 py-6 text-center">Catégorie</th><th className="px-10 py-6 text-right">Montant</th><th className="px-10 py-6 text-center no-print">Actions</th></tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
                                                 {isLoading ? (
@@ -453,18 +456,20 @@
                                                 ) : (
                                                     filteredEntries.map(e => (
                                                         <tr key={e.id} className="hover:bg-slate-50/70 group transition-all border-none">
-                                                            <td className="px-10 py-12">
-                                                                <p className="text-sm font-black text-slate-900 tracking-tight">{new Date(e.date).toLocaleDateString('fr-FR', {day: '2-digit', month: 'long', year: 'numeric'})}</p>
+                                                            <td className="px-10 py-4">
+                                                                <p className="text-xs font-black text-slate-900 tracking-tight">{new Date(e.date).toLocaleDateString('fr-FR', {day: '2-digit', month: 'long', year: 'numeric'})}</p>
                                                             </td>
-                                                            <td className="px-10 py-12">
-                                                                <div className="flex flex-col items-center gap-2">
-                                                                    <div className={`px-4 py-1.5 rounded-full font-black text-[10px] uppercase tracking-tighter shadow-sm ${e.company === 'Fishgoo' ? 'bg-indigo-600 text-white' : 'bg-emerald-500 text-white'}`}>{e.company}</div>
-                                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{e.type}</p>
+                                                            <td className="px-10 py-4">
+                                                                <div className="flex flex-col items-center gap-1">
+                                                                    <div className={`px-3 py-1 rounded-full font-black text-[9px] uppercase tracking-tighter shadow-sm ${e.company === 'Fishgoo' ? 'bg-indigo-600 text-white' : 'bg-emerald-500 text-white'}`}>{e.company}</div>
+                                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest opacity-60">{e.type}</p>
                                                                 </div>
                                                             </td>
-                                                            <td className="px-10 py-12 text-right font-black text-slate-900 text-4xl tracking-tighter italic">{e.amount.toLocaleString()}€</td>
-                                                            <td className="px-10 py-12 text-center no-print">
-                                                                <button onClick={()=>setDeleteTarget(e.id)} className="p-5 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-[25px] active:scale-90 opacity-0 group-hover:opacity-100 transition-all"><Icon name="trash-2" size={32} /></button>
+                                                            <td className="px-10 py-4 text-right">
+                                                                <span className="font-black text-slate-900 text-2xl tracking-tighter italic">{e.amount.toLocaleString()}€</span>
+                                                            </td>
+                                                            <td className="px-10 py-4 text-center no-print">
+                                                                <button onClick={()=>setDeleteTarget(e.id)} className="p-4 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-[20px] active:scale-90 opacity-0 group-hover:opacity-100 transition-all"><Icon name="trash-2" size={24} /></button>
                                                             </td>
                                                         </tr>
                                                     ))
@@ -472,8 +477,8 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <div className="p-10 bg-slate-50 border-t border-slate-100 flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest no-print italic">
-                                        <div className="flex items-center gap-2 text-indigo-500"><Icon name="shield-check" size={14} /> Sécurisé par Google Cloud</div>
+                                    <div className="p-8 bg-slate-50 border-t border-slate-100 flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest no-print italic">
+                                        <div className="flex items-center gap-2 text-indigo-500 uppercase tracking-widest font-black"><Icon name="shield-check" size={14} /> Sécurité Cloud Active</div>
                                         <span>Maj : {new Date().toLocaleTimeString('fr-FR')}</span>
                                     </div>
                                 </div>
