@@ -2,8 +2,9 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tracabilpro - Dashboard Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TRACKPRO - Dashboard de Gestion</title>
+    <!-- Bibliothèques Cloud -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -12,29 +13,48 @@
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        
         body { 
             font-family: 'Plus Jakarta Sans', sans-serif; 
             background-color: #f8fafc; 
+            color: #0f172a;
         }
-        .card-shadow { box-shadow: 0 4px 20px -5px rgba(0, 0, 0, 0.05); }
+
+        .card-shadow { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.02); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        @media print { .no-print { display: none !important; } main { padding: 0 !important; } .card-shadow { box-shadow: none !important; border: 1px solid #e2e8f0 !important; } }
-        .fade-in { animation: fadeIn 0.4s ease-out forwards; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        @media print { 
+            .no-print { display: none !important; } 
+            main { padding: 0 !important; } 
+            .card-shadow { box-shadow: none !important; border: 1px solid #e2e8f0 !important; } 
+        }
+
+        .sync-pulse {
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: .5; transform: scale(1.1); }
+        }
+
+        .fade-in { animation: fadeIn 0.5s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .sidebar-active { background-color: #eff6ff; color: #1d4ed8; border-left: 4px solid #2563eb; }
     </style>
 </head>
-<body class="min-h-screen text-slate-900">
+<body class="min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, collection, onSnapshot, addDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js";
 
         const { useState, useMemo, useEffect } = React;
 
-        // --- VOTRE CONFIGURATION FIREBASE ---
+        // --- CONFIGURATION FIREBASE PERSONNALISÉE ---
         const firebaseConfig = {
             apiKey: "AIzaSyA3hTV9Zi1rpRqdDMR2DePQE9_HiJen6FY",
             authDomain: "jm-collab.firebaseapp.com",
@@ -45,14 +65,13 @@
             measurementId: "G-F4E0WG8YJL"
         };
 
-        const envConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : null;
-        const finalConfig = envConfig || firebaseConfig;
-        const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'tracabilpro-vfinal';
+        // Identifiant FIXE pour garantir la synchronisation multi-appareil
+        const appId = "tracabilite-commune-2026"; 
         
-        const app = initializeApp(finalConfig);
+        const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        if (finalConfig.measurementId) getAnalytics(app);
+        if (firebaseConfig.measurementId) getAnalytics(app);
 
         const PRESETS = {
             'Fishgoo': { 'Salaire': 300, 'Top-up': 200 },
@@ -68,10 +87,11 @@
             const [user, setUser] = useState(null);
             const [entries, setEntries] = useState([]);
             const [isLoading, setIsLoading] = useState(true);
+            const [isSyncing, setIsSyncing] = useState(false);
             const [error, setError] = useState(null);
             const [isSubmitting, setIsSubmitting] = useState(false);
             
-            const [sessionId, setSessionId] = useState(localStorage.getItem('user_session_id') || '');
+            const [sessionId, setSessionId] = useState(localStorage.getItem('user_session_id_v4') || '');
             const [tempId, setTempId] = useState("");
 
             const [formData, setFormData] = useState({
@@ -82,7 +102,7 @@
                 note: ''
             });
 
-            // 1. Authentification Initiale (MANDATAIRE)
+            // 1. Authentification
             useEffect(() => {
                 const initAuth = async () => {
                     try {
@@ -92,37 +112,34 @@
                             await signInAnonymously(auth);
                         }
                     } catch (e) { 
-                        console.error("Erreur Auth:", e);
-                        setError("Erreur de connexion Cloud. Vérifiez si 'Anonymous Auth' est activé dans Firebase.");
+                        setError("Connexion Cloud impossible. Vérifiez l'auth Firebase.");
                     }
                 };
                 initAuth();
-                const unsubscribe = onAuthStateChanged(auth, (u) => {
-                    setUser(u);
-                    if (u) setError(null);
-                });
+                const unsubscribe = onAuthStateChanged(auth, setUser);
                 return () => unsubscribe();
             }, []);
 
-            // 2. Écoute des données
+            // 2. Synchronisation Live
             useEffect(() => {
-                if (!user || !sessionId) {
-                    if (!sessionId) setIsLoading(false);
-                    return;
-                }
+                if (!user || !sessionId) return;
 
                 setIsLoading(true);
+                setIsSyncing(true);
+
                 const colPath = collection(db, 'artifacts', appId, 'public', 'data', sessionId);
                 
                 const unsubscribe = onSnapshot(colPath, (snapshot) => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setEntries(data.sort((a,b) => new Date(b.date) - new Date(a.date)));
                     setIsLoading(false);
+                    setIsSyncing(false);
                     setError(null);
                 }, (err) => {
-                    console.error("Firestore Error:", err);
-                    setError("Accès refusé par la base de données. Vérifiez vos règles Firestore.");
+                    console.error(err);
+                    setError("Accès refusé. Vérifiez vos règles Firestore.");
                     setIsLoading(false);
+                    setIsSyncing(false);
                 });
 
                 return () => unsubscribe();
@@ -130,39 +147,35 @@
 
             const handleSetSession = () => {
                 if (tempId.trim().length < 3) return;
-                const id = tempId.trim();
-                setSessionId(id);
-                localStorage.setItem('user_session_id', id);
+                const cleanId = tempId.trim().toLowerCase();
+                setSessionId(cleanId);
+                localStorage.setItem('user_session_id_v4', cleanId);
             };
 
             const addEntry = async (e) => {
                 e.preventDefault();
-                if (!user) return setError("Vous n'êtes pas encore connecté au Cloud.");
-                if (!formData.amount || !sessionId) return;
+                if (!user || !formData.amount || !sessionId) return;
                 
                 setIsSubmitting(true);
-                setError(null);
-
                 try {
                     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', sessionId), {
                         ...formData,
                         amount: parseFloat(formData.amount),
-                        createdAt: new Date().toISOString()
+                        timestamp: serverTimestamp()
                     });
                     setFormData(prev => ({ ...prev, amount: '', note: '' }));
                 } catch (e) { 
-                    console.error(e);
-                    setError("L'enregistrement a échoué. Vérifiez vos permissions Firebase.");
+                    setError("Échec de l'enregistrement.");
                 } finally {
                     setIsSubmitting(false);
                 }
             };
 
             const deleteEntry = async (id) => {
-                if (!user || !confirm("Supprimer cette trace ?")) return;
+                if (!confirm("Voulez-vous supprimer cette trace ?")) return;
                 try {
                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', sessionId, id));
-                } catch (e) { setError("Erreur lors de la suppression."); }
+                } catch (e) { setError("Erreur de suppression."); }
             };
 
             const stats = useMemo(() => {
@@ -175,24 +188,26 @@
 
             if (!sessionId) {
                 return (
-                    <div className="h-screen flex items-center justify-center bg-slate-900 p-6">
+                    <div className="h-screen flex items-center justify-center bg-[#0f172a] p-6">
                         <div className="bg-white p-10 rounded-[48px] w-full max-w-md shadow-2xl text-center fade-in">
                             <div className="mb-8 flex justify-center">
-                                <div className="p-5 bg-blue-600 rounded-3xl text-white shadow-xl shadow-blue-500/20">
-                                    <Icon name="lock" size={40} />
+                                <div className="p-5 bg-blue-600 rounded-[32px] text-white shadow-xl">
+                                    <Icon name="lock" size={40} className="sync-pulse" />
                                 </div>
                             </div>
-                            <h2 className="text-3xl font-black mb-2 text-slate-800 tracking-tight">Accès Professionnel</h2>
-                            <p className="text-slate-500 mb-8 text-sm font-medium leading-relaxed">Entrez votre identifiant personnalisé pour charger vos comptes sur cet ordinateur.</p>
+                            <h2 className="text-3xl font-black mb-3 text-slate-800 tracking-tight text-center">Accès TRACKPRO</h2>
+                            <p className="text-slate-500 mb-10 text-sm font-medium leading-relaxed text-center">
+                                Entrez votre identifiant pour synchroniser vos données entre vos appareils.
+                            </p>
                             <input 
                                 type="text" 
-                                placeholder="Ex: MonaPro..." 
+                                placeholder="Votre pseudo..." 
                                 value={tempId} 
                                 onChange={e => setTempId(e.target.value)}
-                                className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-3xl mb-4 outline-none focus:border-blue-500 font-bold text-center transition-all text-lg"
+                                className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl outline-none focus:border-blue-500 font-black text-center transition-all text-xl uppercase tracking-widest"
                             />
-                            <button onClick={handleSetSession} className="w-full bg-blue-600 text-white py-5 rounded-3xl font-black text-lg hover:bg-blue-700 shadow-xl active:scale-95 transition-all">
-                                Déverrouiller le Dashboard
+                            <button onClick={handleSetSession} className="w-full mt-4 bg-blue-600 text-white py-6 rounded-[32px] font-black text-lg hover:bg-blue-700 shadow-xl active:scale-95 transition-all">
+                                DÉVERROUILLER
                             </button>
                         </div>
                     </div>
@@ -201,164 +216,175 @@
 
             return (
                 <div className="flex flex-col lg:flex-row min-h-screen">
-                    {/* Sidebar */}
-                    <aside className="w-full lg:w-80 bg-white border-r border-slate-200 p-8 no-print flex flex-col shrink-0">
-                        <div className="flex items-center gap-3 mb-14">
-                            <div className="p-2.5 bg-slate-900 rounded-xl text-white shadow-lg"><Icon name="pie-chart" /></div>
-                            <h1 className="text-2xl font-black tracking-tighter italic text-slate-900 uppercase">TRACEUR.</h1>
+                    {/* BARRE LATÉRALE */}
+                    <aside className="w-full lg:w-80 bg-white border-r border-slate-100 p-8 no-print flex flex-col shrink-0">
+                        <div className="flex items-center gap-4 mb-14 px-2">
+                            <div className="p-3 bg-slate-900 rounded-2xl text-white shadow-lg"><Icon name="bar-chart-3" /></div>
+                            <h1 className="text-2xl font-black tracking-tighter italic text-slate-900 uppercase">TRACKPRO.</h1>
                         </div>
 
-                        <nav className="flex-1 space-y-2">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 px-4">Navigation</p>
-                            <button className="w-full text-left px-5 py-4 rounded-2xl font-bold text-sm bg-blue-50 text-blue-700 border-l-4 border-blue-600 flex items-center gap-4">
+                        <nav className="flex-1 space-y-3">
+                            <button className="w-full text-left px-6 py-4 rounded-2xl font-bold text-sm sidebar-active flex items-center gap-4 transition-all">
                                 <Icon name="layout" size={18} /> Tableau de bord
                             </button>
-                            <button onClick={() => window.print()} className="w-full text-left px-5 py-4 rounded-2xl font-bold text-sm text-slate-400 hover:bg-slate-50 flex items-center gap-4 transition-all">
+                            <button onClick={() => window.print()} className="w-full text-left px-6 py-4 rounded-2xl font-bold text-sm text-slate-400 hover:bg-slate-50 flex items-center gap-4 transition-all">
                                 <Icon name="printer" size={18} /> Rapport PDF
                             </button>
                         </nav>
 
-                        <div className="mt-auto pt-8 border-t border-slate-100">
-                            <div className="bg-slate-900 rounded-[28px] p-5 text-white flex items-center justify-between">
+                        <div className="mt-auto p-6 bg-slate-900 rounded-[32px] text-white">
+                            <div className="flex items-center justify-between">
                                 <div className="truncate pr-2">
-                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Session</p>
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Session Active</p>
                                     <p className="text-sm font-black truncate">{sessionId}</p>
                                 </div>
-                                <button onClick={() => { if(confirm('Déconnexion ?')) { localStorage.removeItem('user_session_id'); location.reload(); } }} className="p-2 bg-white/10 rounded-xl text-white/40 hover:text-red-400 transition-all">
+                                <button onClick={() => { localStorage.removeItem('user_session_id_v4'); location.reload(); }} className="p-2 bg-white/10 rounded-xl text-white/40 hover:text-red-400 transition-all">
                                     <Icon name="log-out" size={16} />
                                 </button>
                             </div>
                         </div>
                     </aside>
 
-                    {/* Main Content */}
+                    {/* DASHBOARD PRINCIPAL */}
                     <main className="flex-1 p-6 lg:p-12 overflow-y-auto">
-                        <header className="mb-12 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                        <header className="mb-14 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                             <div>
-                                <h2 className="text-4xl font-black text-slate-900 tracking-tight">Bonjour !</h2>
-                                <p className="text-slate-500 font-medium mt-1 uppercase text-[10px] tracking-widest">Partenariats Fishgoo & Mulebuy</p>
+                                <h2 className="text-4xl font-black text-slate-900 tracking-tight">Vue Globale</h2>
+                                <p className="text-slate-500 font-medium mt-1">Vos revenus Fishgoo & Mulebuy.</p>
                             </div>
-                            <div className="flex flex-col items-end gap-1">
-                                <div className={`flex items-center gap-2 text-[10px] font-black px-4 py-2 rounded-full border uppercase tracking-widest no-print ${user ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-amber-600 bg-amber-50 border-amber-100'}`}>
-                                    <span className={`w-2 h-2 rounded-full ${user ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
-                                    {user ? 'Cloud Connecté' : 'Connexion Cloud...'}
-                                </div>
-                                {!user && <p className="text-[9px] text-slate-400 font-bold italic">Vérifiez vos réglages Firebase</p>}
+                            <div className={`flex items-center gap-3 text-[10px] font-black px-5 py-3 rounded-full border shadow-sm no-print ${isSyncing ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
+                                <Icon name={isSyncing ? "refresh-cw" : "cloud-check"} size={14} className={isSyncing ? "animate-spin" : ""} />
+                                {isSyncing ? 'MISES À JOUR...' : 'SYNCHRONISÉ'}
                             </div>
                         </header>
 
                         {error && (
-                            <div className="mb-8 p-5 bg-red-50 border-l-4 border-red-500 rounded-2xl text-red-700 font-bold text-sm flex items-center gap-4 no-print fade-in shadow-sm">
-                                <Icon name="alert-octagon" className="shrink-0" /> 
-                                <div>
-                                    <p className="font-black uppercase text-[10px] mb-1">Erreur de système</p>
-                                    <p>{error}</p>
-                                </div>
+                            <div className="mb-10 p-5 bg-red-50 border-l-8 border-red-500 rounded-3xl text-red-700 font-bold text-sm flex items-center gap-4 no-print fade-in shadow-sm">
+                                <Icon name="alert-triangle" /> {error}
                             </div>
                         )}
 
-                        {/* Cartes Stats */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-                            <div className="bg-white p-8 rounded-[36px] card-shadow border border-slate-100">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-blue-500">Reçu ce mois</p>
-                                <p className="text-3xl font-black text-slate-900">{stats.month.toLocaleString()}€</p>
+                        {/* CARTES STATS */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 fade-in">
+                            <div className="bg-white p-8 rounded-[40px] card-shadow border border-slate-50">
+                                <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.1em] mb-3">Ce mois</p>
+                                <p className="text-4xl font-black text-slate-900">{stats.month.toLocaleString('fr-FR')}€</p>
                             </div>
-                            <div className="bg-slate-900 p-8 rounded-[36px] shadow-2xl text-white">
-                                <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-2">Cumul Global</p>
-                                <p className="text-3xl font-black">{stats.total.toLocaleString()}€</p>
+                            <div className="bg-slate-900 p-8 rounded-[40px] shadow-2xl text-white relative overflow-hidden">
+                                <Icon name="trending-up" className="absolute -right-6 -bottom-6 text-white/5" size={140} />
+                                <p className="text-[11px] font-black opacity-40 uppercase tracking-[0.1em] mb-3 text-center">Total Cumulé</p>
+                                <p className="text-4xl font-black text-center">{stats.total.toLocaleString('fr-FR')}€</p>
                             </div>
-                            <div className="bg-white p-8 rounded-[36px] card-shadow border border-slate-100">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-center">Part Fishgoo</p>
-                                <p className="text-2xl font-black text-slate-800 text-center">{stats.fish.toLocaleString()}€</p>
+                            <div className="bg-white p-8 rounded-[40px] card-shadow border border-slate-50 flex flex-col justify-between">
+                                <p className="text-[11px] font-black text-blue-400 uppercase tracking-[0.1em]">Fishgoo</p>
+                                <p className="text-3xl font-black text-slate-800 mt-2">{stats.fish.toLocaleString('fr-FR')}€</p>
+                                <div className="w-full bg-slate-100 h-2 rounded-full mt-6 overflow-hidden">
+                                    <div className="bg-blue-600 h-full transition-all duration-1000" style={{width: stats.total > 0 ? `${(stats.fish/stats.total)*100}%` : '0%'}}></div>
+                                </div>
                             </div>
-                            <div className="bg-white p-8 rounded-[36px] card-shadow border border-slate-100">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-amber-500 text-center">Part Mulebuy</p>
-                                <p className="text-2xl font-black text-slate-800 text-center">{stats.mule.toLocaleString()}€</p>
+                            <div className="bg-white p-8 rounded-[40px] card-shadow border border-slate-50 flex flex-col justify-between">
+                                <p className="text-[11px] font-black text-amber-500 uppercase tracking-[0.1em]">Mulebuy</p>
+                                <p className="text-3xl font-black text-slate-800 mt-2">{stats.mule.toLocaleString('fr-FR')}€</p>
+                                <div className="w-full bg-slate-100 h-2 rounded-full mt-6 overflow-hidden">
+                                    <div className="bg-amber-500 h-full transition-all duration-1000" style={{width: stats.total > 0 ? `${(stats.mule/stats.total)*100}%` : '0%'}}></div>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-12">
-                            {/* Formulaire */}
+                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-12 items-start">
+                            {/* FORMULAIRE */}
                             <div className="xl:col-span-4 no-print fade-in">
-                                <div className="bg-white p-10 rounded-[44px] border border-slate-100 card-shadow sticky top-8">
-                                    <h3 className="text-xs font-black mb-10 text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100 pb-4">Ajouter un revenu</h3>
+                                <div className="bg-white p-10 rounded-[48px] border border-slate-100 card-shadow sticky top-8">
+                                    <h3 className="text-[10px] font-black mb-10 text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100 pb-3">Nouvelle Saisie</h3>
                                     <form onSubmit={addEntry} className="space-y-8">
                                         <div>
                                             <label className="text-[10px] font-black text-slate-400 uppercase block mb-3 ml-2 tracking-widest">Date</label>
-                                            <input type="date" value={formData.date} onChange={e => setFormData(p=>({...p, date: e.target.value}))} className="w-full p-5 bg-slate-50 rounded-2xl border-none outline-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-100 transition-all" />
+                                            <input type="date" value={formData.date} onChange={e => setFormData(p=>({...p, date: e.target.value}))} className="w-full p-6 bg-slate-50 rounded-[28px] border-none outline-none font-bold text-slate-800 focus:ring-4 focus:ring-blue-100 transition-all" />
                                         </div>
-                                        <div className="space-y-4">
-                                            <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-50 rounded-2xl border border-slate-100">
+
+                                        <div className="space-y-5">
+                                            <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-50 rounded-[28px] border border-slate-100">
                                                 {['Fishgoo','Mulebuy'].map(c => (
-                                                    <button key={c} type="button" onClick={()=>setFormData(p=>({...p, company:c}))} className={`py-3 rounded-xl font-bold text-xs transition-all ${formData.company === c ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>{c}</button>
+                                                    <button key={c} type="button" onClick={()=>setFormData(p=>({...p, company:c}))} className={`py-4 rounded-[22px] font-black text-xs transition-all ${formData.company === c ? 'bg-white shadow-md text-blue-600' : 'text-slate-400'}`}>{c}</button>
                                                 ))}
                                             </div>
-                                            <div className="grid grid-cols-2 gap-3">
+                                            <div className="grid grid-cols-2 gap-4">
                                                 {['Salaire','Top-up'].map(t => (
-                                                    <button key={t} type="button" onClick={()=>setFormData(p=>({...p, type:t}))} className={`py-4 rounded-2xl border-2 font-black text-xs transition-all ${formData.type === t ? 'bg-slate-900 border-slate-900 text-white shadow-xl' : 'bg-white border-slate-100 text-slate-300'}`}>{t}</button>
+                                                    <button key={t} type="button" onClick={()=>setFormData(p=>({...p, type:t}))} className={`py-5 rounded-[28px] border-2 font-black text-xs transition-all ${formData.type === t ? 'bg-slate-900 border-slate-900 text-white shadow-xl' : 'bg-white border-slate-100 text-slate-300'}`}>{t}</button>
                                                 ))}
                                             </div>
                                         </div>
+
                                         <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-3 ml-2 tracking-widest">Montant Net (€)</label>
                                             <div className="relative">
-                                                <input type="number" step="0.01" value={formData.amount} onChange={e=>setFormData(p=>({...p, amount: e.target.value}))} placeholder="0,00" className="w-full p-6 bg-slate-50 rounded-3xl border-none font-black text-4xl text-right pr-14 focus:ring-2 focus:ring-blue-100 outline-none text-slate-900" />
-                                                <span className="absolute right-6 top-1/2 -translate-y-1/2 font-bold text-slate-200 text-3xl">€</span>
+                                                <input type="number" step="0.01" value={formData.amount} onChange={e=>setFormData(p=>({...p, amount: e.target.value}))} placeholder="0,00" className="w-full p-8 bg-slate-50 rounded-[32px] border-none font-black text-5xl text-right pr-20 outline-none text-slate-900 focus:ring-4 focus:ring-blue-50 transition-all" />
+                                                <span className="absolute right-8 top-1/2 -translate-y-1/2 font-bold text-slate-200 text-4xl">€</span>
                                             </div>
-                                            <div className="mt-5 flex flex-wrap gap-2">
-                                                <button type="button" onClick={()=>setFormData(p=>({...p, amount: PRESETS[formData.company][formData.type]}))} className="text-[9px] font-black bg-blue-50 text-blue-600 px-5 py-3 rounded-full border border-blue-100 hover:bg-blue-100 transition-all uppercase active:scale-95">
-                                                    Utiliser le montant habituel ({PRESETS[formData.company][formData.type]}€)
+                                            <div className="mt-6 flex flex-wrap gap-2">
+                                                <button type="button" onClick={()=>setFormData(p=>({...p, amount: PRESETS[formData.company][formData.type]}))} className="text-[10px] font-black bg-blue-50 text-blue-600 px-6 py-3.5 rounded-full border border-blue-100 hover:bg-blue-100 transition-all uppercase active:scale-95">
+                                                    Appliquer montant habituel ({PRESETS[formData.company][formData.type]}€)
                                                 </button>
                                             </div>
                                         </div>
+
                                         <button 
                                             type="submit" 
-                                            disabled={isSubmitting || !user}
-                                            className={`w-full py-6 rounded-[32px] font-black text-xl shadow-2xl transition-all flex items-center justify-center gap-4 ${isSubmitting || !user ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white shadow-blue-500/20 hover:bg-blue-700 active:scale-95'}`}
+                                            disabled={isSubmitting}
+                                            className={`w-full py-7 rounded-[32px] font-black text-xl shadow-2xl transition-all flex items-center justify-center gap-4 ${isSubmitting ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white shadow-blue-500/30 hover:bg-blue-700 active:scale-95'}`}
                                         >
-                                            {isSubmitting ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <Icon name="check-circle" />}
-                                            {isSubmitting ? 'EN COURS...' : 'ENREGISTRER'}
+                                            {isSubmitting ? <span className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin"></span> : <Icon name="plus" size={24} />}
+                                            {isSubmitting ? 'ENVOI...' : 'ENREGISTRER'}
                                         </button>
                                     </form>
                                 </div>
                             </div>
 
-                            {/* Historique */}
-                            <div className="xl:col-span-8">
-                                <div className="bg-white rounded-[44px] border border-slate-100 card-shadow overflow-hidden min-h-[600px] flex flex-col">
-                                    <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-white">
-                                        <h3 className="font-black text-2xl text-slate-900 tracking-tight">Détails des virements</h3>
-                                        <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-5 py-2.5 rounded-full uppercase tracking-widest">{entries.length} Opérations</span>
+                            {/* HISTORIQUE */}
+                            <div className="xl:col-span-8 fade-in">
+                                <div className="bg-white rounded-[48px] border border-slate-100 card-shadow overflow-hidden min-h-[600px] flex flex-col">
+                                    <div className="p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center bg-white gap-6 text-center md:text-left">
+                                        <h3 className="font-black text-2xl text-slate-900 tracking-tight">Historique Complet</h3>
+                                        <div className="bg-slate-50 px-5 py-3 rounded-2xl border border-slate-100">
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{entries.length} Opérations</span>
+                                        </div>
                                     </div>
                                     
                                     <div className="overflow-x-auto flex-1 no-scrollbar">
                                         <table className="w-full text-left">
                                             <thead className="bg-slate-50/50 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] sticky top-0 z-10 backdrop-blur-md">
                                                 <tr>
-                                                    <th className="px-10 py-7">Date</th>
-                                                    <th className="px-10 py-7">Origine</th>
-                                                    <th className="px-10 py-7 text-right">Montant</th>
-                                                    <th className="px-10 py-7 text-center no-print">Actions</th>
+                                                    <th className="px-10 py-8">Date</th>
+                                                    <th className="px-10 py-8 text-center">Origine</th>
+                                                    <th className="px-10 py-8 text-right">Montant</th>
+                                                    <th className="px-10 py-8 text-center no-print">Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
                                                 {isLoading ? (
-                                                    <tr><td colSpan="4" className="py-20 text-center text-slate-300 font-bold animate-pulse uppercase tracking-widest">Mise à jour...</td></tr>
+                                                    <tr><td colSpan="4" className="py-40 text-center text-slate-300 font-bold animate-pulse uppercase tracking-[0.3em]">Chargement...</td></tr>
                                                 ) : entries.length === 0 ? (
-                                                    <tr><td colSpan="4" className="py-40 text-center text-slate-300 italic font-bold">Aucune transaction trouvée</td></tr>
+                                                    <tr><td colSpan="4" className="py-40 text-center text-slate-300 italic font-bold">Aucune donnée trouvée</td></tr>
                                                 ) : (
                                                     entries.map(e => (
                                                         <tr key={e.id} className="hover:bg-slate-50/70 group transition-all duration-300">
-                                                            <td className="px-10 py-9 text-sm font-black text-slate-800">{new Date(e.date).toLocaleDateString('fr-FR', {day: '2-digit', month: 'long', year: 'numeric'})}</td>
-                                                            <td className="px-10 py-9">
-                                                                <div className="flex items-center gap-3">
-                                                                    <div className={`w-2.5 h-2.5 rounded-full ${e.company === 'Fishgoo' ? 'bg-blue-500 shadow-lg shadow-blue-200' : 'bg-amber-500 shadow-lg shadow-amber-200'}`}></div>
-                                                                    <span className="font-black text-slate-950 text-sm">{e.company}</span>
-                                                                </div>
-                                                                <div className={`text-[10px] font-black uppercase mt-3 px-3 py-1.5 rounded-xl w-fit border tracking-tighter ${e.type === 'Salaire' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{e.type}</div>
+                                                            <td className="px-10 py-10">
+                                                                <p className="text-sm font-black text-slate-900 tracking-tight">{new Date(e.date).toLocaleDateString('fr-FR', {day: '2-digit', month: 'long', year: 'numeric'})}</p>
                                                             </td>
-                                                            <td className="px-10 py-9 text-right font-black text-slate-900 text-3xl tracking-tighter">{e.amount.toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</td>
-                                                            <td className="px-10 py-9 text-center no-print">
-                                                                <button onClick={()=>deleteEntry(e.id)} className="p-4 text-slate-200 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" size={24} /></button>
+                                                            <td className="px-10 py-10">
+                                                                <div className="flex flex-col items-center">
+                                                                    <div className={`w-3 h-3 rounded-full mb-1 ${e.company === 'Fishgoo' ? 'bg-blue-600 shadow-lg shadow-blue-200' : 'bg-amber-500 shadow-lg shadow-amber-200'}`}></div>
+                                                                    <p className="font-black text-slate-950 text-xs uppercase tracking-tight">{e.company}</p>
+                                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{e.type}</p>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-10 py-10 text-right font-black text-slate-900 text-4xl tracking-tighter">
+                                                                {e.amount.toLocaleString('fr-FR', {minimumFractionDigits: 2})}€
+                                                            </td>
+                                                            <td className="px-10 py-10 text-center no-print">
+                                                                <button onClick={()=>deleteEntry(e.id)} className="p-5 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-3xl transition-all opacity-0 group-hover:opacity-100 active:scale-90">
+                                                                    <Icon name="trash-2" size={28} />
+                                                                </button>
                                                             </td>
                                                         </tr>
                                                     ))
@@ -366,9 +392,11 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <div className="p-10 bg-slate-50/50 border-t border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center flex justify-between items-center">
-                                        <span>Dernière mise à jour Cloud : {new Date().toLocaleTimeString('fr-FR')}</span>
-                                        <span className="flex items-center gap-1.5"><Icon name="database" size={12} /> ID: {appId}</span>
+                                    <div className="p-10 bg-slate-50 border-t border-slate-100 no-print flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                                        <span>Dernière synchro : {new Date().toLocaleTimeString('fr-FR')}</span>
+                                        <div className="flex items-center gap-1.5 text-blue-500">
+                                            <Icon name="shield-check" size={14} /> TRACKPRO v4.0
+                                        </div>
                                     </div>
                                 </div>
                             </div>
