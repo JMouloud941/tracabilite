@@ -27,7 +27,6 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        // Import des modules Firebase via CDN
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -35,7 +34,7 @@
 
         const { useState, useMemo, useEffect } = React;
 
-        // --- VOTRE CONFIGURATION FIREBASE PERSONNALISÉE ---
+        // --- VOTRE CONFIGURATION FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyA3hTV9Zi1rpRqdDMR2DePQE9_HiJen6FY",
             authDomain: "jm-collab.firebaseapp.com",
@@ -46,14 +45,14 @@
             measurementId: "G-F4E0WG8YJL"
         };
 
-        // Gestion adaptative : utilise la config de l'environnement si disponible, sinon la vôtre
-        const finalConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : firebaseConfig;
-        const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'tracabilpro-v3';
+        const envConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : null;
+        const finalConfig = envConfig || firebaseConfig;
+        const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'tracabilpro-vfinal';
         
         const app = initializeApp(finalConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const analytics = getAnalytics(app);
+        if (finalConfig.measurementId) getAnalytics(app);
 
         const PRESETS = {
             'Fishgoo': { 'Salaire': 300, 'Top-up': 200 },
@@ -70,6 +69,7 @@
             const [entries, setEntries] = useState([]);
             const [isLoading, setIsLoading] = useState(true);
             const [error, setError] = useState(null);
+            const [isSubmitting, setIsSubmitting] = useState(false);
             
             const [sessionId, setSessionId] = useState(localStorage.getItem('user_session_id') || '');
             const [tempId, setTempId] = useState("");
@@ -82,7 +82,7 @@
                 note: ''
             });
 
-            // 1. Authentification
+            // 1. Authentification Initiale (MANDATAIRE)
             useEffect(() => {
                 const initAuth = async () => {
                     try {
@@ -91,14 +91,20 @@
                         } else {
                             await signInAnonymously(auth);
                         }
-                    } catch (e) { console.error("Auth error", e); }
+                    } catch (e) { 
+                        console.error("Erreur Auth:", e);
+                        setError("Erreur de connexion Cloud. Vérifiez si 'Anonymous Auth' est activé dans Firebase.");
+                    }
                 };
                 initAuth();
-                const unsubscribe = onAuthStateChanged(auth, setUser);
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    if (u) setError(null);
+                });
                 return () => unsubscribe();
             }, []);
 
-            // 2. Lecture des données
+            // 2. Écoute des données
             useEffect(() => {
                 if (!user || !sessionId) {
                     if (!sessionId) setIsLoading(false);
@@ -115,7 +121,7 @@
                     setError(null);
                 }, (err) => {
                     console.error("Firestore Error:", err);
-                    setError("Permissions insuffisantes. Vérifiez que les règles Firestore autorisent l'accès au chemin public.");
+                    setError("Accès refusé par la base de données. Vérifiez vos règles Firestore.");
                     setIsLoading(false);
                 });
 
@@ -131,7 +137,12 @@
 
             const addEntry = async (e) => {
                 e.preventDefault();
-                if (!user || !formData.amount || !sessionId) return;
+                if (!user) return setError("Vous n'êtes pas encore connecté au Cloud.");
+                if (!formData.amount || !sessionId) return;
+                
+                setIsSubmitting(true);
+                setError(null);
+
                 try {
                     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', sessionId), {
                         ...formData,
@@ -139,14 +150,19 @@
                         createdAt: new Date().toISOString()
                     });
                     setFormData(prev => ({ ...prev, amount: '', note: '' }));
-                } catch (e) { setError("Impossible d'ajouter l'entrée."); }
+                } catch (e) { 
+                    console.error(e);
+                    setError("L'enregistrement a échoué. Vérifiez vos permissions Firebase.");
+                } finally {
+                    setIsSubmitting(false);
+                }
             };
 
             const deleteEntry = async (id) => {
                 if (!user || !confirm("Supprimer cette trace ?")) return;
                 try {
                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', sessionId, id));
-                } catch (e) { console.error(e); }
+                } catch (e) { setError("Erreur lors de la suppression."); }
             };
 
             const stats = useMemo(() => {
@@ -160,17 +176,17 @@
             if (!sessionId) {
                 return (
                     <div className="h-screen flex items-center justify-center bg-slate-900 p-6">
-                        <div className="bg-white p-10 rounded-[48px] w-full max-w-md shadow-2xl text-center">
+                        <div className="bg-white p-10 rounded-[48px] w-full max-w-md shadow-2xl text-center fade-in">
                             <div className="mb-8 flex justify-center">
                                 <div className="p-5 bg-blue-600 rounded-3xl text-white shadow-xl shadow-blue-500/20">
                                     <Icon name="lock" size={40} />
                                 </div>
                             </div>
-                            <h2 className="text-3xl font-black mb-2 text-slate-800 tracking-tight text-center">Accès Professionnel</h2>
-                            <p className="text-slate-500 mb-8 text-center text-sm font-medium leading-relaxed">Entrez votre identifiant personnalisé pour charger vos comptes sur cet ordinateur.</p>
+                            <h2 className="text-3xl font-black mb-2 text-slate-800 tracking-tight">Accès Professionnel</h2>
+                            <p className="text-slate-500 mb-8 text-sm font-medium leading-relaxed">Entrez votre identifiant personnalisé pour charger vos comptes sur cet ordinateur.</p>
                             <input 
                                 type="text" 
-                                placeholder="Ex: MonaPro2026..." 
+                                placeholder="Ex: MonaPro..." 
                                 value={tempId} 
                                 onChange={e => setTempId(e.target.value)}
                                 className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-3xl mb-4 outline-none focus:border-blue-500 font-bold text-center transition-all text-lg"
@@ -185,19 +201,20 @@
 
             return (
                 <div className="flex flex-col lg:flex-row min-h-screen">
+                    {/* Sidebar */}
                     <aside className="w-full lg:w-80 bg-white border-r border-slate-200 p-8 no-print flex flex-col shrink-0">
                         <div className="flex items-center gap-3 mb-14">
-                            <div className="p-2.5 bg-slate-900 rounded-2xl text-white shadow-lg"><Icon name="pie-chart" /></div>
+                            <div className="p-2.5 bg-slate-900 rounded-xl text-white shadow-lg"><Icon name="pie-chart" /></div>
                             <h1 className="text-2xl font-black tracking-tighter italic text-slate-900 uppercase">TRACEUR.</h1>
                         </div>
 
                         <nav className="flex-1 space-y-2">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 px-4">Navigation</p>
-                            <button className="w-full text-left px-5 py-4 rounded-2xl font-bold text-sm sidebar-active flex items-center gap-4">
+                            <button className="w-full text-left px-5 py-4 rounded-2xl font-bold text-sm bg-blue-50 text-blue-700 border-l-4 border-blue-600 flex items-center gap-4">
                                 <Icon name="layout" size={18} /> Tableau de bord
                             </button>
                             <button onClick={() => window.print()} className="w-full text-left px-5 py-4 rounded-2xl font-bold text-sm text-slate-400 hover:bg-slate-50 flex items-center gap-4 transition-all">
-                                <Icon name="download-cloud" size={18} /> Rapport PDF
+                                <Icon name="printer" size={18} /> Rapport PDF
                             </button>
                         </nav>
 
@@ -214,24 +231,33 @@
                         </div>
                     </aside>
 
+                    {/* Main Content */}
                     <main className="flex-1 p-6 lg:p-12 overflow-y-auto">
                         <header className="mb-12 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                             <div>
-                                <h2 className="text-4xl font-black text-slate-900 tracking-tight">Vue d'ensemble</h2>
+                                <h2 className="text-4xl font-black text-slate-900 tracking-tight">Bonjour !</h2>
                                 <p className="text-slate-500 font-medium mt-1 uppercase text-[10px] tracking-widest">Partenariats Fishgoo & Mulebuy</p>
                             </div>
-                            <div className="flex items-center gap-2 text-[10px] font-black text-emerald-600 bg-emerald-50 px-5 py-2.5 rounded-full border border-emerald-100 uppercase tracking-widest no-print">
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                                Synchronisation Active
+                            <div className="flex flex-col items-end gap-1">
+                                <div className={`flex items-center gap-2 text-[10px] font-black px-4 py-2 rounded-full border uppercase tracking-widest no-print ${user ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-amber-600 bg-amber-50 border-amber-100'}`}>
+                                    <span className={`w-2 h-2 rounded-full ${user ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                                    {user ? 'Cloud Connecté' : 'Connexion Cloud...'}
+                                </div>
+                                {!user && <p className="text-[9px] text-slate-400 font-bold italic">Vérifiez vos réglages Firebase</p>}
                             </div>
                         </header>
 
                         {error && (
-                            <div className="mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 font-bold text-sm flex items-center gap-3 no-print">
-                                <Icon name="alert-circle" /> {error}
+                            <div className="mb-8 p-5 bg-red-50 border-l-4 border-red-500 rounded-2xl text-red-700 font-bold text-sm flex items-center gap-4 no-print fade-in shadow-sm">
+                                <Icon name="alert-octagon" className="shrink-0" /> 
+                                <div>
+                                    <p className="font-black uppercase text-[10px] mb-1">Erreur de système</p>
+                                    <p>{error}</p>
+                                </div>
                             </div>
                         )}
 
+                        {/* Cartes Stats */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
                             <div className="bg-white p-8 rounded-[36px] card-shadow border border-slate-100">
                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-blue-500">Reçu ce mois</p>
@@ -252,7 +278,8 @@
                         </div>
 
                         <div className="grid grid-cols-1 xl:grid-cols-12 gap-12">
-                            <div className="xl:col-span-4 no-print">
+                            {/* Formulaire */}
+                            <div className="xl:col-span-4 no-print fade-in">
                                 <div className="bg-white p-10 rounded-[44px] border border-slate-100 card-shadow sticky top-8">
                                     <h3 className="text-xs font-black mb-10 text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100 pb-4">Ajouter un revenu</h3>
                                     <form onSubmit={addEntry} className="space-y-8">
@@ -283,11 +310,19 @@
                                                 </button>
                                             </div>
                                         </div>
-                                        <button type="submit" className="w-full bg-blue-600 text-white py-6 rounded-[32px] font-black text-xl shadow-2xl shadow-blue-500/20 hover:bg-blue-700 active:scale-95 transition-all">ENREGISTRER</button>
+                                        <button 
+                                            type="submit" 
+                                            disabled={isSubmitting || !user}
+                                            className={`w-full py-6 rounded-[32px] font-black text-xl shadow-2xl transition-all flex items-center justify-center gap-4 ${isSubmitting || !user ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white shadow-blue-500/20 hover:bg-blue-700 active:scale-95'}`}
+                                        >
+                                            {isSubmitting ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <Icon name="check-circle" />}
+                                            {isSubmitting ? 'EN COURS...' : 'ENREGISTRER'}
+                                        </button>
                                     </form>
                                 </div>
                             </div>
 
+                            {/* Historique */}
                             <div className="xl:col-span-8">
                                 <div className="bg-white rounded-[44px] border border-slate-100 card-shadow overflow-hidden min-h-[600px] flex flex-col">
                                     <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-white">
@@ -307,7 +342,7 @@
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
                                                 {isLoading ? (
-                                                    <tr><td colSpan="4" className="py-20 text-center text-slate-300 font-bold animate-pulse uppercase tracking-widest">Chargement...</td></tr>
+                                                    <tr><td colSpan="4" className="py-20 text-center text-slate-300 font-bold animate-pulse uppercase tracking-widest">Mise à jour...</td></tr>
                                                 ) : entries.length === 0 ? (
                                                     <tr><td colSpan="4" className="py-40 text-center text-slate-300 italic font-bold">Aucune transaction trouvée</td></tr>
                                                 ) : (
@@ -331,8 +366,9 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <div className="p-10 bg-slate-50/50 border-t border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
-                                        Dernière mise à jour Cloud : {new Date().toLocaleTimeString('fr-FR')}
+                                    <div className="p-10 bg-slate-50/50 border-t border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center flex justify-between items-center">
+                                        <span>Dernière mise à jour Cloud : {new Date().toLocaleTimeString('fr-FR')}</span>
+                                        <span className="flex items-center gap-1.5"><Icon name="database" size={12} /> ID: {appId}</span>
                                     </div>
                                 </div>
                             </div>
