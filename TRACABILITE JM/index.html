@@ -1,0 +1,386 @@
+!DOCTYPE html
+html lang=fr
+head
+    meta charset=UTF-8
+    meta name=viewport content=width=device-width, initial-scale=1.0
+    titleTraçabilité Pro - Fishgoo & Mulebuytitle
+    script src=httpscdn.tailwindcss.comscript
+    script src=httpsunpkg.comreact@18umdreact.production.min.jsscript
+    script src=httpsunpkg.comreact-dom@18umdreact-dom.production.min.jsscript
+    script src=httpsunpkg.com@babelstandalonebabel.min.jsscript
+    script src=httpsunpkg.comlucide@latestscript
+    
+    style
+        @import url('httpsfonts.googleapis.comcss2family=Plus+Jakarta+Sanswght@400;500;600;700;800&display=swap');
+        body { 
+            font-family 'Plus Jakarta Sans', sans-serif;
+            background-color #f8fafc;
+        }
+        .card-shadow {
+            box-shadow 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+        }
+        .no-scrollbar-webkit-scrollbar { display none; }
+        .scale-in { animation scaleIn 0.3s ease-out; }
+        @keyframes scaleIn {
+            from { opacity 0; transform scale(0.95); }
+            to { opacity 1; transform scale(1); }
+        }
+        @media print { .no-print { display none !important; } }
+    style
+head
+body class=min-h-screen
+    div id=rootdiv
+
+    script type=textbabel data-type=module
+        import { initializeApp } from httpswww.gstatic.comfirebasejs11.6.1firebase-app.js;
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from httpswww.gstatic.comfirebasejs11.6.1firebase-auth.js;
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, addDoc, deleteDoc } from httpswww.gstatic.comfirebasejs11.6.1firebase-firestore.js;
+
+        const { useState, useMemo, useEffect } = React;
+
+        const firebaseConfig = JSON.parse(window.__firebase_config  '{}');
+        const appId = typeof window.__app_id !== 'undefined'  window.__app_id  'income-tracker-pro-v2';
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const PRESETS = {
+            'Fishgoo' { 'Salaire' 300, 'Top-up' 200 },
+            'Mulebuy' { 'Salaire' 200, 'Top-up' 225 }
+        };
+
+        const Icon = ({ name, size = 20, className =  }) = {
+            useEffect(() = {
+                if (window.lucide) window.lucide.createIcons();
+            }, [name]);
+            return i data-lucide={name} className={className} style={{ width size, height size }}i;
+        };
+
+        const App = () = {
+            const [user, setUser] = useState(null);
+            const [entries, setEntries] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [showSyncModal, setShowSyncModal] = useState(false);
+            const [syncError, setSyncError] = useState(null);
+            
+            const [usedUid, setUsedUid] = useState(localStorage.getItem('saved_id_custom')  null);
+            const [newCustomId, setNewCustomId] = useState();
+            
+            const [searchTerm, setSearchTerm] = useState();
+            const [filterCompany, setFilterCompany] = useState(Tous);
+
+            const [formData, setFormData] = useState({
+                date new Date().toISOString().split('T')[0],
+                company 'Fishgoo',
+                type 'Salaire',
+                amount '',
+                note ''
+            });
+
+             1. Authentification
+            useEffect(() = {
+                const initAuth = async () = {
+                    try {
+                        if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
+                            await signInWithCustomToken(auth, window.__initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error(Auth error, error);
+                    }
+                };
+                initAuth();
+                const unsubscribe = onAuthStateChanged(auth, (u) = {
+                    setUser(u);
+                    if (u && !usedUid) {
+                        setUsedUid(u.uid);
+                        localStorage.setItem('saved_id_custom', u.uid);
+                    }
+                });
+                return () = unsubscribe();
+            }, []);
+
+             2. Écoute Firestore
+            useEffect(() = {
+                if (!user  !usedUid) return;
+                
+                setIsLoading(true);
+                const colPath = collection(db, 'artifacts', appId, 'public', 'data', usedUid);
+                
+                const unsubscribe = onSnapshot(colPath, (snapshot) = {
+                    const data = snapshot.docs.map(doc = ({ id doc.id, ...doc.data() }));
+                    setEntries(data.sort((a, b) = new Date(b.date) - new Date(a.date)));
+                    setIsLoading(false);
+                }, (err) = {
+                    console.error(Firestore error, err);
+                    setIsLoading(false);
+                });
+
+                return () = unsubscribe();
+            }, [user, usedUid]);
+
+            const changeId = () = {
+                const cleanedId = newCustomId.trim();
+                if (cleanedId.length  3) {
+                    setSyncError(L'identifiant doit faire au moins 3 caractères.);
+                    return;
+                }
+                setUsedUid(cleanedId);
+                localStorage.setItem('saved_id_custom', cleanedId);
+                setNewCustomId();
+                setSyncError(null);
+                setShowSyncModal(false);
+                setIsLoading(true);
+            };
+
+            const addEntry = async (e) = {
+                e.preventDefault();
+                if (!user  !formData.amount  !usedUid) return;
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', usedUid), {
+                        ...formData,
+                        amount parseFloat(formData.amount),
+                        createdAt new Date().toISOString()
+                    });
+                    setFormData(prev = ({ ...prev, amount '', note '' }));
+                } catch (error) {
+                    console.error(Add error, error);
+                }
+            };
+
+            const deleteEntry = async (id) = {
+                if (!user  !usedUid) return;
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', usedUid, id));
+                } catch (error) {
+                    console.error(Delete error, error);
+                }
+            };
+
+            const stats = useMemo(() = {
+                const total = entries.reduce((acc, curr) = acc + (curr.amount  0), 0);
+                const month = new Date().getMonth();
+                const year = new Date().getFullYear();
+                const monthly = entries.filter(e = {
+                    const d = new Date(e.date);
+                    return d.getMonth() === month && d.getFullYear() === year;
+                }).reduce((acc, curr) = acc + curr.amount, 0);
+                const fish = entries.filter(e = e.company === 'Fishgoo').reduce((acc, curr) = acc + curr.amount, 0);
+                const mule = entries.filter(e = e.company === 'Mulebuy').reduce((acc, curr) = acc + curr.amount, 0);
+                return { total, monthly, fish, mule };
+            }, [entries]);
+
+            const copySyncId = () = {
+                if (usedUid) {
+                    const el = document.createElement('textarea'); 
+                    el.value = usedUid; 
+                    document.body.appendChild(el); 
+                    el.select(); 
+                    document.execCommand('copy'); 
+                    document.body.removeChild(el);
+                }
+            };
+
+            if (isLoading  !user) {
+                return (
+                    div className=h-screen flex items-center justify-center bg-white
+                        div className=flex flex-col items-center gap-4
+                            div className=w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spindiv
+                            p className=font-bold text-slate-400 uppercase tracking-widest text-xsSynchronisation Cloud...p
+                        div
+                    div
+                );
+            }
+
+            return (
+                div className=max-w-7xl mx-auto px-4 py-8 scale-in
+                    header className=flex flex-col lgflex-row justify-between items-start lgitems-center gap-6 mb-10 no-print
+                        div
+                            h1 className=text-3xl font-black text-slate-900 flex items-center gap-2
+                                Icon name=wallet className=text-blue-600 
+                                Traçabilité Pro
+                            h1
+                            p className=text-slate-500 font-bold text-xs uppercase tracking-widest mt-1
+                                Identifiant  span className=text-blue-600 bg-blue-50 px-2 py-0.5 rounded font-mono{usedUid}span
+                            p
+                        div
+                        div className=flex gap-3 w-full lgw-auto
+                            button onClick={() = { setShowSyncModal(true); setSyncError(null); }} className=flex-1 lgflex-none flex items-center justify-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-2xl font-bold hoverbg-slate-800 transition-all shadow-lg activescale-95
+                                Icon name=user-cog size={18}  Gérer l'identifiant
+                            button
+                            button onClick={() = window.print()} className=lgflex-none flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-400 rounded-2xl font-bold hoverbg-slate-50 activescale-95
+                                Icon name=printer size={18} 
+                            button
+                        div
+                    header
+
+                    div className=grid grid-cols-1 mdgrid-cols-2 lggrid-cols-4 gap-6 mb-10
+                        div className=bg-white p-6 rounded-[32px] border border-slate-100 card-shadow
+                            p className=text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 text-blue-500Mois en coursp
+                            p className=text-3xl font-black text-slate-900{stats.monthly.toLocaleString('fr-FR')}€p
+                        div
+                        div className=bg-white p-6 rounded-[32px] border border-slate-100 card-shadow
+                            p className=text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 text-emerald-500Cumul Globalp
+                            p className=text-3xl font-black text-slate-900{stats.total.toLocaleString('fr-FR')}€p
+                        div
+                        div className=bg-white p-6 rounded-[32px] border border-slate-100 card-shadow
+                            p className=text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1Total Fishgoop
+                            p className=text-2xl font-black text-slate-800{stats.fish.toLocaleString('fr-FR')}€p
+                        div
+                        div className=bg-white p-6 rounded-[32px] border border-slate-100 card-shadow
+                            p className=text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1Total Mulebuyp
+                            p className=text-2xl font-black text-slate-800{stats.mule.toLocaleString('fr-FR')}€p
+                        div
+                    div
+
+                    div className=grid grid-cols-1 lggrid-cols-12 gap-8
+                        div className=lgcol-span-4 no-print
+                            div className=bg-white p-8 rounded-[40px] border border-slate-100 card-shadow sticky top-8
+                                h2 className=text-xl font-black mb-8 text-slate-800 uppercase tracking-tighterEnregistrer une traceh2
+                                form onSubmit={addEntry} className=space-y-6
+                                    div
+                                        label className=block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2Datelabel
+                                        input type=date name=date value={formData.date} onChange={(e) = setFormData(p=({...p, datee.target.value}))} className=w-full px-5 py-4 bg-slate-50 rounded-2xl border-none outline-none font-bold 
+                                    div
+                                    div
+                                        label className=block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2Entrepriselabel
+                                        div className=flex p-1 bg-slate-50 rounded-xl
+                                            {['Fishgoo', 'Mulebuy'].map(c = (
+                                                button key={c} type=button onClick={() = setFormData(p = ({...p, company c}))} 
+                                                    className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${formData.company === c  'bg-white shadow-sm text-blue-600'  'text-slate-400'}`}
+                                                    {c}
+                                                button
+                                            ))}
+                                        div
+                                    div
+                                    div
+                                        label className=block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2Typelabel
+                                        div className=flex gap-2
+                                            {['Salaire', 'Top-up'].map(t = (
+                                                button key={t} type=button onClick={() = setFormData(p = ({...p, type t}))} 
+                                                    className={`flex-1 py-3 rounded-xl border-2 font-bold text-xs transition-all ${formData.type === t  'bg-slate-900 border-slate-900 text-white'  'bg-white border-slate-100 text-slate-400'}`}
+                                                    {t}
+                                                button
+                                            ))}
+                                        div
+                                    div
+                                    div
+                                        label className=block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2Montant net (€)label
+                                        div className=relative
+                                            input type=number step=0.01 name=amount placeholder=0,00 value={formData.amount} onChange={(e) = setFormData(p=({...p, amounte.target.value}))} className=w-full px-6 py-4 bg-slate-50 rounded-2xl border-none font-black text-2xl text-right pr-12 transition-all 
+                                            span className=absolute right-4 top-12 -translate-y-12 font-bold text-slate-300€span
+                                        div
+                                        div className=flex gap-2 mt-3
+                                            button type=button onClick={() = setFormData(p=({...p, amount PRESETS[formData.company][formData.type]}))} className=text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hoverbg-blue-100 transition-colors
+                                                Appliquer montant habituel ({PRESETS[formData.company][formData.type]}€)
+                                            button
+                                        div
+                                    div
+                                    div
+                                        label className=block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2Noteslabel
+                                        textarea name=note value={formData.note} onChange={(e) = setFormData(p=({...p, notee.target.value}))} placeholder=Frais, taux de change... className=w-full px-5 py-4 bg-slate-50 rounded-2xl border-none text-sm font-medium h-24 transition-all resize-nonetextarea
+                                    div
+                                    button type=submit className=w-full bg-blue-600 text-white py-4 rounded-[24px] font-black text-lg hoverbg-blue-700 shadow-xl shadow-blue-100 transition-all flex items-center justify-center gap-2 activescale-95
+                                        Icon name=plus-circle  Enregistrer
+                                    button
+                                form
+                            div
+                        div
+
+                        div className=lgcol-span-8
+                            div className=bg-white rounded-[40px] border border-slate-100 card-shadow overflow-hidden flex flex-col h-full
+                                div className=p-8 border-b border-slate-50
+                                    div className=flex flex-col mdflex-row mditems-center justify-between gap-4 mb-6
+                                        h2 className=text-xl font-black text-slate-800 uppercase tracking-tighterHistoriqueh2
+                                        div className=flex items-center gap-2 bg-slate-50 p-1 rounded-xl
+                                            {['Tous', 'Fishgoo', 'Mulebuy'].map(c = (
+                                                button key={c} onClick={() = setFilterCompany(c)} 
+                                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${filterCompany === c  'bg-white shadow-sm text-blue-600'  'text-slate-400 hovertext-slate-600'}`}
+                                                    {c}
+                                                button
+                                            ))}
+                                        div
+                                    div
+                                    div className=relative
+                                        Icon name=search size={16} className=absolute left-4 top-12 -translate-y-12 text-slate-300 
+                                        input type=text placeholder=Rechercher... value={searchTerm} onChange={(e) = setSearchTerm(e.target.value)} 
+                                            className=w-full pl-10 pr-6 py-3 bg-slate-50 rounded-xl border-none text-sm font-medium 
+                                    div
+                                div
+
+                                div className=flex-1 overflow-x-auto no-scrollbar
+                                    table className=w-full text-left
+                                        thead className=bg-slate-50 text-[9px] uppercase text-slate-400 font-black tracking-widest sticky top-0 z-10
+                                            tr
+                                                th className=px-8 py-4Dateth
+                                                th className=px-8 py-4Sourceth
+                                                th className=px-8 py-4Montantth
+                                                th className=px-8 py-4Notesth
+                                                th className=px-8 py-4 no-printth
+                                            tr
+                                        thead
+                                        tbody className=divide-y divide-slate-50
+                                            {entries.filter(e = {
+                                                const searchMatch = e.company.toLowerCase().includes(searchTerm.toLowerCase())  (e.note  ).toLowerCase().includes(searchTerm.toLowerCase());
+                                                const companyMatch = filterCompany === Tous  e.company === filterCompany;
+                                                return searchMatch && companyMatch;
+                                            }).map(e = (
+                                                tr key={e.id} className=hoverbg-slate-5050 transition-colors group
+                                                    td className=px-8 py-5 text-sm font-bold text-slate-400{new Date(e.date).toLocaleDateString('fr-FR')}td
+                                                    td className=px-8 py-5
+                                                        span className=font-black text-slate-800 text-sm{e.company}span
+                                                        div className={`text-[9px] font-black uppercase mt-0.5 ${e.type === 'Salaire'  'text-blue-500'  'text-amber-500'}`}{e.type}div
+                                                    td
+                                                    td className=px-8 py-5 font-black text-slate-900 text-lg{e.amount.toLocaleString('fr-FR')}€td
+                                                    td className=px-8 py-5 text-xs text-slate-400 font-medium max-w-[150px] truncate{e.note  —}td
+                                                    td className=px-8 py-5 text-right no-print
+                                                        button onClick={() = deleteEntry(e.id)} className=p-2 text-slate-200 hovertext-red-500 hoverbg-red-50 rounded-lg transition-all opacity-0 group-hoveropacity-100Icon name=trash-2 size={16} button
+                                                    td
+                                                tr
+                                            ))}
+                                        tbody
+                                    table
+                                div
+                            div
+                        div
+                    div
+
+                    {showSyncModal && (
+                        div className=fixed inset-0 bg-slate-90080 backdrop-blur-xl z-50 flex items-center justify-center p-4
+                            div className=bg-white rounded-[40px] p-10 max-w-md w-full shadow-2xl scale-in border border-white20
+                                div className=flex justify-between items-center mb-8
+                                    div className=p-3 bg-slate-900 text-white rounded-2xlIcon name=user size={24} div
+                                    button onClick={() = setShowSyncModal(false)} className=p-2 text-slate-400 hoverbg-slate-100 rounded-full transition-colorsIcon name=x size={24} button
+                                div
+                                h3 className=text-2xl font-black text-slate-900 mb-2 underline decoration-blue-500 underline-offset-4Gérer l'accèsh3
+                                p className=text-slate-500 mb-8 font-medium text-smEntrez un nom pour retrouver vos données partout.p
+                                div className=space-y-6
+                                    div className=space-y-3
+                                        label className=block text-[10px] font-black text-slate-400 uppercase tracking-widestIdentifiant actuellabel
+                                        div className=bg-slate-50 p-4 rounded-xl border border-slate-100 flex justify-between items-center group onClick={copySyncId}
+                                            code className=text-slate-800 font-bold text-sm font-mono{usedUid}code
+                                            button className=text-blue-600 hovertext-blue-700 opacity-40 group-hoveropacity-100 transition-opacityIcon name=copy size={16} button
+                                        div
+                                    div
+                                    div className=h-px bg-slate-100div
+                                    div className=space-y-4
+                                        input type=text placeholder=Nouveau nom (ex Mona2026)... value={newCustomId} onChange={(e) = { setNewCustomId(e.target.value); setSyncError(null); }} className=w-full px-5 py-4 bg-slate-50 rounded-2xl border-2 border-transparent focusborder-blue-500 outline-none text-sm font-bold 
+                                        {syncError && p className=text-[10px] text-red-500 font-bold{syncError}p}
+                                        button onClick={changeId} className=w-full bg-slate-900 text-white py-4 rounded-2xl font-black hoverbg-slate-800 transition-all text-sm shadow-xl activescale-95Appliquer ce nombutton
+                                    div
+                                div
+                                button onClick={() = setShowSyncModal(false)} className=w-full mt-8 text-slate-400 font-bold text-xs uppercase hovertext-slate-600 transition-colorsFermerbutton
+                            div
+                        div
+                    )}
+                div
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(App );
+    script
+body
+html
