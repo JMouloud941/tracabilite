@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Traçabilité - Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        body { 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            background-color: #f8fafc; 
+        }
+        .card-shadow { box-shadow: 0 4px 20px -5px rgba(0, 0, 0, 0.05); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        @media print { .no-print { display: none !important; } }
+        .sidebar-active { background-color: #eff6ff; color: #1d4ed8; border-left: 4px solid #2563eb; }
+    </style>
+</head>
+<body class="min-h-screen text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const { useState, useMemo, useEffect } = React;
+
+        // --- GESTION DES CONFIGURATIONS ---
+        const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : {
+            apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: ""
+        };
+        const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'tracabilpro-default';
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const PRESETS = {
+            'Fishgoo': { 'Salaire': 300, 'Top-up': 200 },
+            'Mulebuy': { 'Salaire': 200, 'Top-up': 225 }
+        };
+
+        const Icon = ({ name, size = 20, className = "" }) => {
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name, size, className]);
+            return <i data-lucide={name} className={className} style={{ width: size, height: size }}></i>;
+        };
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [entries, setEntries] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState(null);
+            
+            // Identifiant de session (ex: MonaPro)
+            const [sessionId, setSessionId] = useState(localStorage.getItem('user_session_id') || '');
+            const [tempId, setTempId] = useState("");
+
+            const [formData, setFormData] = useState({
+                date: new Date().toISOString().split('T')[0],
+                company: 'Fishgoo',
+                type: 'Salaire',
+                amount: '',
+                note: ''
+            });
+
+            // 1. AUTHENTIFICATION (Règle 3)
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
+                            await signInWithCustomToken(auth, window.__initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) { console.error("Auth error", e); }
+                };
+                initAuth();
+                const unsubscribe = onAuthStateChanged(auth, setUser);
+                return () => unsubscribe();
+            }, []);
+
+            // 2. LECTURE DES DONNÉES (Règle 1 & 2)
+            useEffect(() => {
+                // On attend que l'utilisateur soit connecté ET qu'il ait choisi un ID
+                if (!user || !sessionId) {
+                    if (sessionId) setIsLoading(true);
+                    else setIsLoading(false);
+                    return;
+                }
+
+                setIsLoading(true);
+                // Chemin public autorisé par la Règle 1
+                const colPath = collection(db, 'artifacts', appId, 'public', 'data', sessionId);
+                
+                const unsubscribe = onSnapshot(colPath, (snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // Tri côté client (Règle 2)
+                    setEntries(data.sort((a,b) => new Date(b.date) - new Date(a.date)));
+                    setIsLoading(false);
+                    setError(null);
+                }, (err) => {
+                    console.error("Firestore Permission Error:", err);
+                    setError("Erreur de permissions. Vérifiez votre configuration.");
+                    setIsLoading(false);
+                });
+
+                return () => unsubscribe();
+            }, [user, sessionId]);
+
+            const handleSetSession = () => {
+                if (tempId.trim().length < 3) return;
+                const id = tempId.trim();
+                setSessionId(id);
+                localStorage.setItem('user_session_id', id);
+            };
+
+            const addEntry = async (e) => {
+                e.preventDefault();
+                if (!user || !formData.amount || !sessionId) return;
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', sessionId), {
+                        ...formData,
+                        amount: parseFloat(formData.amount),
+                        createdAt: new Date().toISOString()
+                    });
+                    setFormData(prev => ({ ...prev, amount: '', note: '' }));
+                } catch (e) { setError("Impossible d'ajouter l'entrée."); }
+            };
+
+            const deleteEntry = async (id) => {
+                if (!user || !confirm("Supprimer cette trace ?")) return;
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', sessionId, id));
+                } catch (e) { console.error(e); }
+            };
+
+            const stats = useMemo(() => {
+                const total = entries.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+                const month = entries.filter(e => new Date(e.date).getMonth() === new Date().getMonth()).reduce((acc, c) => acc + c.amount, 0);
+                const fish = entries.filter(e => e.company === 'Fishgoo').reduce((acc, c) => acc + c.amount, 0);
+                const mule = entries.filter(e => e.company === 'Mulebuy').reduce((acc, c) => acc + c.amount, 0);
+                return { total, month, fish, mule };
+            }, [entries]);
+
+            // ÉCRAN D'ACCÈS
+            if (!sessionId) {
+                return (
+                    <div className="h-screen flex items-center justify-center bg-slate-900 p-6">
+                        <div className="bg-white p-10 rounded-[48px] w-full max-w-md shadow-2xl text-center">
+                            <div className="mb-8 flex justify-center">
+                                <div className="p-5 bg-blue-600 rounded-3xl text-white shadow-xl shadow-blue-500/20">
+                                    <Icon name="lock" size={40} />
+                                </div>
+                            </div>
+                            <h2 className="text-3xl font-black mb-2 text-slate-800 tracking-tight">Accès Professionnel</h2>
+                            <p className="text-slate-500 mb-8 text-sm font-medium">Entrez votre identifiant pour charger vos comptes sur cet ordinateur.</p>
+                            <input 
+                                type="text" 
+                                placeholder="Votre identifiant (ex: MonaPro)..." 
+                                value={tempId} 
+                                onChange={e => setTempId(e.target.value)}
+                                className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-3xl mb-4 outline-none focus:border-blue-500 font-bold text-center transition-all text-lg"
+                            />
+                            <button onClick={handleSetSession} className="w-full bg-blue-600 text-white py-5 rounded-3xl font-black text-lg hover:bg-blue-700 shadow-xl active:scale-95 transition-all">
+                                Déverrouiller le Dashboard
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex flex-col lg:flex-row min-h-screen">
+                    {/* BARRE LATÉRALE (PC) */}
+                    <aside className="w-full lg:w-80 bg-white border-r border-slate-200 p-8 no-print flex flex-col shrink-0">
+                        <div className="flex items-center gap-3 mb-14">
+                            <div className="p-2.5 bg-slate-900 rounded-2xl text-white shadow-lg"><Icon name="pie-chart" /></div>
+                            <h1 className="text-2xl font-black tracking-tighter italic text-slate-900 uppercase">TRACEUR.</h1>
+                        </div>
+
+                        <nav className="flex-1 space-y-2">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 px-4">Navigation</p>
+                            <button className="w-full text-left px-5 py-4 rounded-2xl font-bold text-sm sidebar-active flex items-center gap-4">
+                                <Icon name="layout" size={18} /> Tableau de bord
+                            </button>
+                            <button onClick={() => window.print()} className="w-full text-left px-5 py-4 rounded-2xl font-bold text-sm text-slate-400 hover:bg-slate-50 flex items-center gap-4 transition-all">
+                                <Icon name="download-cloud" size={18} /> Rapport PDF
+                            </button>
+                        </nav>
+
+                        <div className="mt-auto pt-8 border-t border-slate-100">
+                            <div className="bg-slate-900 rounded-[28px] p-5 text-white flex items-center justify-between">
+                                <div className="truncate pr-2">
+                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Session</p>
+                                    <p className="text-sm font-black truncate">{sessionId}</p>
+                                </div>
+                                <button onClick={() => { localStorage.removeItem('user_session_id'); location.reload(); }} className="p-2 bg-white/10 rounded-xl text-white/40 hover:text-red-400 transition-all">
+                                    <Icon name="log-out" size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    </aside>
+
+                    {/* CONTENU PRINCIPAL */}
+                    <main className="flex-1 p-6 lg:p-12 overflow-y-auto">
+                        <header className="mb-12 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                            <div>
+                                <h2 className="text-4xl font-black text-slate-900 tracking-tight">Vue d'ensemble</h2>
+                                <p className="text-slate-500 font-medium mt-1 uppercase text-[10px] tracking-widest">Partenariats Fishgoo & Mulebuy</p>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px] font-black text-emerald-600 bg-emerald-50 px-5 py-2.5 rounded-full border border-emerald-100 uppercase tracking-widest no-print">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                Synchronisation Active
+                            </div>
+                        </header>
+
+                        {error && (
+                            <div className="mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 font-bold text-sm flex items-center gap-3 no-print">
+                                <Icon name="alert-circle" /> {error}
+                            </div>
+                        )}
+
+                        {/* CARTES STATS */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+                            <div className="bg-white p-8 rounded-[36px] card-shadow border border-slate-100">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-blue-500">Reçu ce mois</p>
+                                <p className="text-3xl font-black text-slate-900">{stats.month.toLocaleString()}€</p>
+                            </div>
+                            <div className="bg-slate-900 p-8 rounded-[36px] shadow-2xl text-white">
+                                <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-2">Cumul Global</p>
+                                <p className="text-3xl font-black">{stats.total.toLocaleString()}€</p>
+                            </div>
+                            <div className="bg-white p-8 rounded-[36px] card-shadow border border-slate-100">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Fishgoo</p>
+                                <p className="text-2xl font-black text-slate-800">{stats.fish.toLocaleString()}€</p>
+                            </div>
+                            <div className="bg-white p-8 rounded-[36px] card-shadow border border-slate-100">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-amber-500">Mulebuy</p>
+                                <p className="text-2xl font-black text-slate-800">{stats.mule.toLocaleString()}€</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-12">
+                            {/* FORMULAIRE (Gôche) */}
+                            <div className="xl:col-span-4 no-print">
+                                <div className="bg-white p-10 rounded-[44px] border border-slate-100 card-shadow sticky top-8">
+                                    <h3 className="text-xs font-black mb-10 text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100 pb-4">Ajouter un revenu</h3>
+                                    <form onSubmit={addEntry} className="space-y-8">
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-3 ml-2 tracking-widest">Date</label>
+                                            <input type="date" value={formData.date} onChange={e => setFormData(p=>({...p, date: e.target.value}))} className="w-full p-5 bg-slate-50 rounded-2xl border-none outline-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-100 transition-all" />
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-50 rounded-2xl border border-slate-100">
+                                                {['Fishgoo','Mulebuy'].map(c => (
+                                                    <button key={c} type="button" onClick={()=>setFormData(p=>({...p, company:c}))} className={`py-3 rounded-xl font-bold text-xs transition-all ${formData.company === c ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>{c}</button>
+                                                ))}
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {['Salaire','Top-up'].map(t => (
+                                                    <button key={t} type="button" onClick={()=>setFormData(p=>({...p, type:t}))} className={`py-4 rounded-2xl border-2 font-black text-xs transition-all ${formData.type === t ? 'bg-slate-900 border-slate-900 text-white shadow-xl' : 'bg-white border-slate-100 text-slate-300'}`}>{t}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="relative">
+                                                <input type="number" step="0.01" value={formData.amount} onChange={e=>setFormData(p=>({...p, amount: e.target.value}))} placeholder="0,00" className="w-full p-6 bg-slate-50 rounded-3xl border-none font-black text-4xl text-right pr-14 focus:ring-2 focus:ring-blue-100 outline-none text-slate-900" />
+                                                <span className="absolute right-6 top-1/2 -translate-y-1/2 font-bold text-slate-200 text-3xl">€</span>
+                                            </div>
+                                            <div className="mt-5 flex flex-wrap gap-2">
+                                                <button type="button" onClick={()=>setFormData(p=>({...p, amount: PRESETS[formData.company][formData.type]}))} className="text-[9px] font-black bg-blue-50 text-blue-600 px-5 py-3 rounded-full border border-blue-100 hover:bg-blue-100 transition-all uppercase active:scale-95">
+                                                    Utiliser le montant habituel ({PRESETS[formData.company][formData.type]}€)
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <button type="submit" className="w-full bg-blue-600 text-white py-6 rounded-[32px] font-black text-xl shadow-2xl shadow-blue-500/20 hover:bg-blue-700 active:scale-95 transition-all">ENREGISTRER</button>
+                                    </form>
+                                </div>
+                            </div>
+
+                            {/* HISTORIQUE (Droite) */}
+                            <div className="xl:col-span-8">
+                                <div className="bg-white rounded-[44px] border border-slate-100 card-shadow overflow-hidden min-h-[600px] flex flex-col">
+                                    <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-white">
+                                        <h3 className="font-black text-2xl text-slate-900 tracking-tight">Détails des virements</h3>
+                                        <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-5 py-2.5 rounded-full uppercase tracking-widest">{entries.length} Opérations</span>
+                                    </div>
+                                    
+                                    <div className="overflow-x-auto flex-1 no-scrollbar">
+                                        <table className="w-full text-left">
+                                            <thead className="bg-slate-50/50 text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] sticky top-0 z-10 backdrop-blur-md">
+                                                <tr>
+                                                    <th className="px-10 py-7">Date</th>
+                                                    <th className="px-10 py-7">Origine</th>
+                                                    <th className="px-10 py-7 text-right">Montant</th>
+                                                    <th className="px-10 py-7 text-center no-print">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {isLoading ? (
+                                                    <tr><td colSpan="4" className="py-20 text-center text-slate-300 font-bold animate-pulse uppercase tracking-widest">Chargement...</td></tr>
+                                                ) : entries.length === 0 ? (
+                                                    <tr><td colSpan="4" className="py-40 text-center text-slate-300 italic font-bold">Aucune transaction trouvée</td></tr>
+                                                ) : (
+                                                    entries.map(e => (
+                                                        <tr key={e.id} className="hover:bg-slate-50/70 group transition-all duration-300">
+                                                            <td className="px-10 py-9 text-sm font-black text-slate-800">{new Date(e.date).toLocaleDateString('fr-FR', {day: '2-digit', month: 'long', year: 'numeric'})}</td>
+                                                            <td className="px-10 py-9">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className={`w-2.5 h-2.5 rounded-full ${e.company === 'Fishgoo' ? 'bg-blue-500 shadow-lg shadow-blue-200' : 'bg-amber-500 shadow-lg shadow-amber-200'}`}></div>
+                                                                    <span className="font-black text-slate-950 text-sm">{e.company}</span>
+                                                                </div>
+                                                                <div className={`text-[10px] font-black uppercase mt-3 px-3 py-1.5 rounded-xl w-fit border tracking-tighter ${e.type === 'Salaire' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{e.type}</div>
+                                                            </td>
+                                                            <td className="px-10 py-9 text-right font-black text-slate-900 text-3xl tracking-tighter">{e.amount.toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</td>
+                                                            <td className="px-10 py-9 text-center no-print">
+                                                                <button onClick={()=>deleteEntry(e.id)} className="p-4 text-slate-200 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" size={24} /></button>
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div className="p-10 bg-slate-50/50 border-t border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                        Dernière mise à jour Cloud : {new Date().toLocaleTimeString('fr-FR')}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
